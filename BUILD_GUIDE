@@ -1,0 +1,749 @@
+SoulSeer
+Initial Launch Build Guide
+Pay-Per-Minute Readings & Community
+A Community of Gifted Psychics
+
+SCOPE: This guide covers the complete initial public launch of SoulSeer — pay-per-minute readings (chat, voice, video), client–reader direct messaging, and the community hub. All other features are explicitly deferred to a future build phase.
+ 
+1. Purpose & Vision
+SoulSeer is a premium platform connecting spiritual readers with clients seeking guidance. The app embodies a mystical yet professional atmosphere while providing robust functionality for seamless spiritual consultations. All design elements should prioritize intuitive user experience alongside the ethereal aesthetic.
+This initial launch focuses exclusively on three pillars that deliver immediate value:
+•	Pay-per-minute live readings (chat, voice, and video) via Agora
+•	Client–reader direct messaging outside of sessions, with reader-controlled paid reply pricing
+•	Community hub — public forum and links to the SoulSeer Discord and Facebook community group
+
+2. Technology Stack
+⚠️  Every integration listed here is required. Do not substitute alternatives.
+2.1 Core Framework
+Layer	Technology	Purpose
+Frontend	React (Vite)	UI — monorepo client
+Backend	Node.js + Express	API server — monorepo server
+Language	TypeScript (strict)	Both client and server
+Architecture	Monorepo	Shared types via /shared package
+
+2.2 Required Integrations
+Service	Provider	Use
+Authentication	Auth0	All user auth — social + email login
+Real-Time Comms	Agora RTC + RTM	Chat, voice, and video reading sessions + signaling
+Database	Neon (Postgres)	All persistent data via Drizzle ORM
+Payments	Stripe	Balance top-ups, reader payouts via Stripe Connect
+File Storage	Cloudinary or S3	Reader profile images uploaded by admin
+
+🚨  Agora handles ALL real-time communication for readings. Do not implement custom WebRTC or WebSocket-based reading sessions.
+
+3. Theme & Design System
+3.1 Aesthetic
+Celestial, mystical, and ethereal. Dark-mode default. The design must feel premium and spiritual — not generic. Every screen should feel cohesive.
+3.2 Color Palette
+Role	Color	Hex
+Primary / Headings	Mystical Pink	#FF69B4
+Accent	Gold	#D4AF37
+Background	Deep Black / Dark Navy	#0A0A0F
+Surface / Cards	Dark Purple-Black	#13111A
+Body Text (dark bg)	White	#FFFFFF
+Body Text (light bg)	Black	#000000
+
+3.3 Typography
+•	Headings: Alex Brush font, pink (#FF69B4)
+•	Body text: Playfair Display
+•	UI elements (buttons, labels, nav): consistent with above — never mix in system fonts
+•	Accessibility: all text must meet WCAG AA contrast ratios
+3.4 Visual Elements
+•	Cosmic/celestial design elements: stars, moons, constellation patterns used as decorative accents
+•	Smooth, subtle animations on transitions and interactive elements — animations must not hinder usability
+•	Gold accents used sparingly for emphasis and borders
+•	Background image: https://i.postimg.cc/sXdsKGTK/DALL-E-2025-06-06-14-36-29-A-vivid-ethereal-background-image-designed-for-a-psychic-reading-app.webp
+•	Hero image: https://i.postimg.cc/tRLSgCPb/HERO-IMAGE-1.jpg
+•	Founder image: https://i.postimg.cc/s2ds9RtC/FOUNDER.jpg
+3.5 Mobile-First Requirement
+🚨  The app MUST be fully responsive and mobile-friendly. This is non-negotiable. Test every screen at 375px, 768px, and 1280px breakpoints.
+
+4. Navigation Structure (Initial Launch)
+Only these pages exist in the initial launch. All other pages from the full build guide are deferred.
+Route	Page	Access
+/	Home	Public
+/readers	Browse Readers	Public
+/readers/:id	Reader Profile	Public
+/about	About SoulSeer	Public
+/community	Community Hub	Public
+/messages	Direct Messages	Authenticated
+/login	Login / Sign Up	Public (unauthed only)
+/dashboard	Role Dashboard	Authenticated
+/reading/:id	Live Reading Session	Authenticated (participants only)
+/help	Help / FAQ	Public
+
+⚠️  Routes for /shop, /live, /gifts are NOT built in this phase. Do not scaffold them.
+
+5. User Roles & Accounts
+5.1 Role Definitions
+Role	How Created	Capabilities
+Client	Self-register via Auth0	Browse readers, fund balance, start readings, message readers, post in forum, rate readings
+Reader	Admin creates only	Manage own profile/rates, toggle availability, accept readings, reply to messages (free or paid), view earnings
+Admin	Manual DB seed	Full platform control — user management, reader creation, transaction oversight, forum moderation
+
+⚠️  Reader accounts can ONLY be created by an admin through the admin dashboard. Readers cannot self-register.
+5.2 Auth0 Configuration
+•	Use Auth0 Universal Login for all client authentication
+•	Social providers: Google and Apple (required for App Store compliance)
+•	Email/password login also enabled
+•	JWT tokens used for all API authentication — validate on every protected route
+•	Auth0 user ID (sub) stored in DB and used as the link between Auth0 and internal user record
+•	Role stored in the internal database, not in Auth0 metadata
+•	On first login, create internal user record if one does not exist
+•	Readers log in via Auth0 using credentials created by admin — admin sets their initial password and provides it to them
+
+6. Home Page
+6.1 Layout (top to bottom)
+•	Header: 'SoulSeer' in Alex Brush font, pink, centered
+•	Hero image directly below header
+•	Tagline: 'A Community of Gifted Psychics' in Playfair Display, centered
+•	Currently online readers grid — shows live availability, per-minute rates, and reading types offered
+•	Newsletter signup input field with submit button
+•	Community links: buttons to Facebook group and Discord server (open in new tab)
+6.2 Online Readers Display
+•	Fetch and display all readers where isOnline = true
+•	Each reader card shows: profile photo, name, specialties, per-minute rate (per type), and an availability badge
+•	'Start Reading' button on each card — directs unauthenticated users to login first
+•	Real-time updates: reader online/offline status must update without full page refresh (polling every 30s or WebSocket broadcast)
+
+7. Readers — Browse & Profiles
+7.1 Browse Readers Page (/readers)
+•	Grid of all reader profiles — online readers shown first
+•	Filter by: specialty, reading type (chat/voice/video), and online status
+•	Each card: profile photo, name, short bio excerpt, rating, specialties, per-minute rates per type, online badge
+7.2 Reader Profile Page (/readers/:id)
+•	Full bio
+•	Specialties and services offered
+•	Per-minute rate displayed separately for chat, voice, and video
+•	Star rating and review count
+•	Recent reviews from clients (reviewer name, star rating, text, date)
+•	'Start Reading' buttons for each available type — requires auth and minimum balance
+•	'Send Message' button — requires auth
+
+ 
+Section 8 — Pay-Per-Minute Reading System
+Complete Production Specification for App Store Publishing
+🚨  THIS IS THE CORE REVENUE FEATURE OF THE ENTIRE PLATFORM. Every subsection of Section 8 is mandatory. Nothing here is optional. Nothing here is a suggestion. The reading system must be fully functional, billing-accurate, App Store compliant, and capable of handling real money from real users on day one of public launch. If any part of this section is incomplete, the app cannot be published and cannot earn revenue.
+
+8.0 What This System Must Do
+The pay-per-minute reading system is the entire reason SoulSeer exists. It must do the following without failure, without exception, and without approximation:
+•	Connect a paying client with a SoulSeer reader in real time via text chat, voice call, or video call
+•	Bill the client accurately — to the minute — for the exact time both parties are connected, at the reader's stated per-minute rate
+•	Protect the client from being overcharged — never bill for time when the session was not actually live
+•	Protect the reader's earnings — ensure every minute they work is recorded and compensated
+•	Handle network interruptions gracefully — a dropped connection is not the same as ending a session
+•	Complete every session with a clean financial record — duration, cost, payment status, and transcript all saved
+•	Function identically on iOS, Android, and web browsers — all three platforms must work for App Store and Google Play submission
+🚨  Billing must be 100% server-side. The client device NEVER reports how long a session lasted, how much to charge, or how much the reader earned. The server owns all of this. A client who manipulates their app, kills the process, or tampers with API calls must not be able to steal a reading or avoid being billed for time they used.
+
+8.1 Agora Architecture — What Gets Used and Why
+SoulSeer uses two separate Agora products simultaneously for voice and video readings, and one Agora product for chat readings. Understanding the distinction is critical before writing a single line of Agora code.
+Agora Product	Used For	What It Does
+Agora RTC SDK	Voice readings, Video readings	Real-time audio and video transmission between two users
+Agora RTM SDK	Chat readings, Signaling for ALL reading types	Real-time text messaging and presence/signaling channel
+Agora RTM (Signaling)	Session coordination for voice and video	Used to send session control messages: ready, end call, mute status, grace period notices
+
+⚠️  For voice and video readings, BOTH RTC and RTM are active at the same time. RTC carries the audio/video. RTM carries the control signals. Do not try to send control messages through the RTC data channel.
+8.1.1 Agora App ID and Token Security
+🚨  The Agora App ID and App Certificate must NEVER appear in client-side code, environment variables exposed to the browser, or any file that gets bundled into the app. They live only on the server. The client receives only short-lived tokens.
+•	AGORA_APP_ID — stored in server .env only
+•	AGORA_APP_CERTIFICATE — stored in server .env only. Required to generate tokens.
+•	Client receives a dynamically generated, short-lived token per session from your server
+•	Token is scoped to a specific channel name and a specific user UID
+•	Token expires after 3600 seconds (1 hour) — sufficient for any session
+•	If a token expires mid-session, the client silently renews it via the token refresh endpoint without interrupting the session
+8.1.2 Agora User UIDs
+•	Use the internal database user ID (integer) as the Agora UID for all sessions
+•	This ensures the server can always match an Agora UID to a database user without maintaining a separate mapping
+8.1.3 Agora Channel Naming
+•	Every reading session gets a unique Agora channel name — format: reading_[readingId] (e.g., reading_4821)
+•	This same channel name is used for both RTC and RTM
+•	The server generates this name when the reading record is created and stores it in the readings table
+
+8.2 Token Server — Server-Side Token Generation
+🚨  Token generation happens on your server using the agora-token npm package. Never use a third-party token server. Never generate tokens on the client.
+8.2.1 Required Package
+npm install agora-token
+8.2.2 Token Types
+Token Type	Agora Function	Used For
+RTC Token	RtcTokenBuilder.buildTokenWithUid()	Voice and video sessions — joining the audio/video channel
+RTM Token	RtmTokenBuilder.buildToken()	Chat sessions and signaling for all session types
+
+8.2.3 Token Endpoint
+•	Route: POST /api/readings/:id/agora-token
+•	Auth: Authenticated — only the reading's clientId or readerId may call this
+•	Server verifies the reading exists, is in 'accepted' or 'in_progress' status, and the requesting user is a participant
+•	Returns: { rtcToken, rtmToken, channelName, uid, appId }
+•	Both the client and the reader call this endpoint before attempting to join the Agora channel
+•	Token refresh: same endpoint called again with refresh=true query param to silently renew an expiring token
+
+8.3 Complete Reading Lifecycle — Every Step, In Order
+🚨  Every state transition in this lifecycle must be recorded in the readings table. If the server restarts, crashes, or loses memory, the database must contain enough information to understand what happened to every reading and what billing occurred.
+8.3.1 Reading Status State Machine
+Status	Meaning	Next Valid Statuses
+pending	Client requested, waiting for reader to accept	accepted, cancelled
+accepted	Reader accepted, both users fetching tokens	in_progress, cancelled
+in_progress	Both joined Agora, billing timer running	completed, cancelled
+completed	Session ended normally, billing finalized	(terminal)
+cancelled	Session ended abnormally or never started	(terminal)
+
+⚠️  Status transitions must only move forward. An 'in_progress' reading must never go back to 'pending'. A 'completed' reading must never be updated again. Validate status before every update.
+8.3.2 Step-by-Step Lifecycle
+Step 1 — Client Requests a Reading
+•	Client selects a reader and reading type (chat, voice, or video) and clicks 'Start Reading'
+•	Server checks: is reader online? (isOnline = true). If not, return 400 — do not create the reading
+•	Server checks: does client have at least the cost of 5 minutes at this reader's rate? If not, redirect to Add Funds — do not create the reading
+•	Server creates reading record with status = 'pending', stores readerId, clientId, type, pricePerMinute, channelName
+•	Server sends a real-time notification to the reader via WebSocket: { type: 'new_reading_request', reading }
+•	Client UI shows a waiting screen with a 60-second countdown — if reader does not accept in 60 seconds, server auto-cancels and notifies client
+Step 2 — Reader Accepts
+•	Reader clicks 'Accept' on the incoming request notification
+•	Server updates reading status to 'accepted'
+•	Server notifies both client and reader via WebSocket: { type: 'reading_accepted', readingId, channelName }
+•	Both apps immediately call POST /api/readings/:id/agora-token to retrieve their tokens and initialize the Agora SDK
+Step 3 — Both Join Agora
+•	Client and reader both join the Agora channel using their respective tokens
+•	When both have joined: each app calls POST /api/readings/:id/start
+⚠️  POST /api/readings/:id/start is idempotent — if startedAt is already set, return 200 with no further action. Never start two billing timers for one reading.
+•	Server sets status = 'in_progress', records startedAt, starts server-side billing timer
+•	Server sends WebSocket message to both: { type: 'session_billing_started', readingId }
+Step 4 — Active Session
+•	Billing timer fires every 60 seconds on the server (see Section 8.5 for full billing logic)
+•	Client UI shows: elapsed time counter, running cost counter, remaining balance
+•	Server sends a balance update to the client via WebSocket after every billing tick
+•	If client balance falls below the cost of 2 more minutes: server sends a low balance warning
+Step 5 — Session Ends (Normal)
+•	Either party clicks 'End Session'
+•	App sends an RTM signal to the other participant: { type: 'session_ending', initiatedBy: userId }
+•	Both apps call POST /api/readings/:id/end
+•	Server stops billing timer, finalizes the reading record (status = 'completed', completedAt, duration, totalPrice, paymentStatus = 'paid')
+•	Client is shown session summary screen and prompted to rate the reading
+Step 6 — Session Ends (Abnormal)
+See Section 8.6 for the full disconnection and grace period specification.
+
+8.4 Session Types — Chat, Voice, Video
+🚨  All three session types must be fully implemented and functional. 'Functional' means a real user can use them on a real phone and have a real reading. Placeholder UIs, dummy connections, or 'coming soon' states are not acceptable for launch.
+8.4.1 Chat Readings
+•	Agora product: RTM SDK only (no RTC)
+•	Both users join an Agora RTM channel with the reading's channelName
+•	Every message sent must also be saved to the server: POST /api/readings/:id/message
+•	Server stores each message in the reading's chatTranscript field (jsonb array)
+•	UI: scrollable message history, input field at bottom, send button, timestamps, character limit 2000
+•	Transcript persisted to DB on session end and viewable in reading history by both parties
+8.4.2 Voice Readings
+•	Agora products: RTC SDK (audio only) + RTM SDK (signaling)
+•	RTC: audio only — do not enable video track. Set client role to HOST for both participants.
+•	RTM: used only for session control signals (end call, mute status, disconnect warnings)
+•	Mandatory UI elements:
+◦	Elapsed time counter (MM:SS, updates every second)
+◦	Running cost counter (e.g., '$3.20', updates every second)
+◦	Remaining balance with low-balance visual warning
+◦	Mute / unmute button — muting must not end the session or affect billing
+◦	Speaker toggle (earpiece vs. speaker) — required for mobile
+◦	End Call button — prominent, requires one confirmation tap
+◦	Connection quality indicator via Agora onNetworkQuality callback
+•	The call must function with the app in the background on iOS and Android — background audio is required for App Store compliance
+8.4.3 Video Readings
+•	Agora products: RTC SDK (audio + video) + RTM SDK (signaling)
+•	Both participants are HOST role with audio and video tracks enabled
+•	All voice UI requirements apply, PLUS:
+◦	Remote video view — the other participant's video stream, displayed prominently
+◦	Local video preview — small self-view in picture-in-picture corner
+◦	Camera toggle (on/off) — turning off camera must not end the session or affect billing
+◦	Front/rear camera switch — required for mobile
+◦	When camera is off: show the user's profile photo — never a black rectangle
+•	Video must be disabled when the app goes to the background on iOS (App Store requirement). Audio continues. Video resumes automatically when app returns to foreground.
+•	Camera and microphone permissions must be requested before joining — if denied, show a clear explanation and link to device Settings. Never crash.
+
+8.5 Server-Side Billing — Complete Specification
+🚨  This is the most security-critical code in the entire application. Errors here mean either clients are overcharged (chargebacks, refunds, App Store violations, potential legal liability) or readers are underpaid (breach of contractor agreement). Every line of billing code must be reviewed, tested, and treated as financial infrastructure.
+8.5.1 Billing Timer Architecture
+•	When POST /api/readings/:id/start is received, the server creates an in-memory billing session object and starts a setInterval timer firing every 60,000ms
+•	In-memory sessions stored in a Map<readingId, BillingSession> — backed by the database after every tick
+🚨  If the server restarts while sessions are in progress, the in-memory Map is lost. On server startup, query the DB for all readings with status = 'in_progress'. For each one, calculate elapsed minutes since startedAt, charge that amount, and set status to 'completed'. Do not leave orphaned in-progress readings after a restart.
+8.5.2 Per-Minute Billing Tick — Exact Logic
+This is exactly what must happen inside the setInterval callback, in this exact order:
+1.	Fetch the current reading record from DB. If status is not 'in_progress', clear the timer and return — do not bill.
+2.	Fetch the client user record from DB. Get their current accountBalance.
+3.	Check: is accountBalance >= pricePerMinute? If NO: go to Section 8.5.3 (Insufficient Balance).
+4.	If YES: begin a database transaction.
+5.	Inside the transaction: deduct pricePerMinute from client's accountBalance.
+6.	Inside the transaction: calculate readerShare = Math.floor(pricePerMinute * 0.70). Add readerShare to reader's accountBalance.
+7.	Inside the transaction: increment billedMinutes on the reading record. Update duration = billedMinutes.
+8.	Inside the transaction: insert a row into the transactions table — type: 'reading_charge', userId: clientId, amount: pricePerMinute, readingId, balanceBefore, balanceAfter.
+9.	Commit the transaction. If commit fails, do NOT notify users and do NOT update in-memory state. Log the error. Retry once on the next tick.
+10.	After successful commit: send WebSocket message to client: { type: 'billing_tick', billedMinutes, totalCharged, newBalance }
+11.	Send WebSocket message to reader: { type: 'billing_tick', billedMinutes, totalEarned }
+⚠️  Use Math.floor for the reader share — never floating point math for money. The platform always retains the rounding remainder.
+8.5.3 Insufficient Balance During Session
+12.	Immediately stop the billing timer — clearInterval.
+13.	Do NOT charge the partial minute. The client is not billed for time they could not pay for.
+14.	DB transaction: set reading status = 'completed', completedAt = now(), duration = billedMinutes, totalPrice = billedMinutes * pricePerMinute, paymentStatus = 'paid'.
+15.	Send RTM signal to both participants: { type: 'session_ended', reason: 'insufficient_balance' }
+16.	Send WebSocket message to client: { type: 'session_ended', reason: 'insufficient_balance', totalCharged, duration }
+17.	Send WebSocket message to reader: { type: 'session_ended', reason: 'client_balance_exhausted', totalEarned, duration }
+⚠️  Warn the client before this happens. When balance < 2 minutes remaining, send a low balance warning. When < 1 minute, send a final warning.
+8.5.4 Anti-Fraud and Double-Charge Prevention
+•	POST /api/readings/:id/start checks if there is already an active billing session for this readingId in the server Map — if yes, return 200 without creating a second timer
+•	POST /api/readings/:id/start checks if reading status is already 'in_progress' or 'completed' — if yes, return 200
+•	Every billing tick checks reading status from DB before charging — if not 'in_progress', skip and clear the timer
+•	POST /api/readings/:id/end is idempotent — if reading is already 'completed', return 200 with no action
+•	All balance operations wrapped in DB transactions — network failure mid-transaction rolls back automatically
+
+8.6 Disconnection Handling & Grace Period
+🚨  A user losing their connection is not the same as ending a session. Treating every disconnect as a session end would result in clients stranded mid-reading and readers losing income due to network hiccups.
+8.6.1 Types of Disconnection
+Scenario	Cause	Correct Handling
+Intentional end	User clicks End Session	Immediate session end, finalize billing
+Network blip	Brief packet loss, tunnel, elevator	Grace period — resume automatically
+App backgrounded (iOS)	User switches apps or locks phone	Audio continues, grace period if video drops
+App crash	App force-closed or killed by OS	Detected via Agora onUserOffline — start grace period
+Device lost power	Battery died or device turned off	Same as app crash — grace period
+Reader goes offline	Reader closes app or loses connection	Grace period — reader may reconnect within 2 minutes
+
+8.6.2 Grace Period Specification
+•	Grace period duration: 2 minutes (120 seconds)
+•	Triggered when: Agora fires onUserOffline for either participant AND reading status is 'in_progress'
+•	When grace period starts: pause billing timer (save the timerId for resumption)
+•	Notify the still-connected participant: { type: 'participant_disconnected', disconnectedUserId, graceSeconds: 120 }
+•	Reconnection: if the disconnected user rejoins within 2 minutes, they call POST /api/readings/:id/reconnect — server resumes the billing timer and sends { type: 'session_resumed' } to both
+•	Grace period expires: stop billing timer permanently, set reading status = 'completed', duration = billedMinutes (grace period time is NOT billed), send { type: 'session_ended', reason: 'disconnection_timeout' } to both
+⚠️  The grace period itself is not billed. Only minutes where both participants were actively connected are charged.
+8.6.3 Detecting Disconnection
+•	Agora RTC fires onUserOffline(uid, reason) when a remote user drops — client app reports this event to POST /api/readings/:id/participant-status
+•	Heartbeat: both apps send a WebSocket ping every 30 seconds during an active session. If the server doesn't receive a ping for 90 seconds, treat it as a disconnect and start grace period
+
+8.7 Reading System API Routes — Complete Reference
+Method	Route	Auth	Purpose
+POST	/api/readings/on-demand	Client	Create a new reading request. Validates reader online status and client minimum balance.
+POST	/api/readings/:id/accept	Reader	Reader accepts the request. Notifies client. Updates status to 'accepted'.
+POST	/api/readings/:id/reject	Reader	Reader declines. Updates status to 'cancelled'. Notifies client.
+POST	/api/readings/:id/agora-token	Participant	Generate and return RTC + RTM tokens, channelName, uid, appId.
+POST	/api/readings/:id/start	Participant	Mark both joined. Start server-side billing timer. Idempotent.
+POST	/api/readings/:id/end	Participant	End session normally. Stop timer. Finalize billing. Idempotent.
+POST	/api/readings/:id/reconnect	Participant	Resume session after disconnection within grace period.
+POST	/api/readings/:id/participant-status	Participant	Report Agora onUserOffline event to server. Triggers grace period logic.
+POST	/api/readings/:id/message	Participant	Store a chat message in the session transcript (chat readings only).
+POST	/api/readings/:id/rate	Client	Submit star rating (1–5) and written review after session ends.
+GET	/api/readings/:id	Participant	Get reading details including transcript (if chat).
+GET	/api/readings/client	Client	Client's full reading history.
+GET	/api/readings/reader	Reader	Reader's full session history.
+
+
+8.8 Session UI — Every Screen, Every State
+🚨  The session UI must handle every possible state. A user must never see a blank screen, an unhandled error, or confusing behavior during a reading. These are paying customers.
+8.8.1 Pre-Session Screens
+Waiting for Reader Screen (Client)
+•	Shows: reader's name and photo, reading type, rate per minute, 60-second countdown
+•	If 60 seconds passes: auto-cancel, show 'Reader did not respond. Please try again or choose another reader.'
+•	Cancel button available at any time before acceptance — no charge
+Incoming Request Screen (Reader)
+•	Shows: client's display name, reading type, session rate as confirmation
+•	Accept and Decline buttons — both prominent. 30-second visible countdown.
+•	Reader must be able to see and respond to this notification from anywhere in the app
+Connecting Screen (Both)
+•	Shows animated connecting indicator — 'Connecting to your session...'
+•	If connection fails: show specific error message and offer a retry button
+•	Timeout: if not established within 30 seconds, abort and show error — never leave users on a perpetual loading screen
+8.8.2 Active Session Screens
+Chat Session UI
+•	Message history scrollable area — auto-scroll on new message
+•	Status bar at top: elapsed time (MM:SS), running cost ($X.XX), remaining balance
+•	Low balance banner when balance < 2 minutes remaining
+•	'End Session' button accessible at all times
+Voice Session UI
+•	Reader's profile photo centered — this is what the client looks at during the call
+•	Control bar: Mute button (shows current state clearly), Speaker toggle, End Call button
+•	Connection quality indicator. '[Name] is muted' indicator when other party mutes.
+Video Session UI
+•	Remote video fills the majority of the screen
+•	Local video preview: small, overlaid in a corner, draggable
+•	Controls: Mute audio, Toggle camera, Flip camera, End Call
+•	When either party turns off camera: display their profile photo — never a black rectangle
+•	Control bar auto-hides after 5 seconds of inactivity, reappears on screen tap
+8.8.3 Session End Screens
+Session Summary Screen
+•	Shows: reader's name and photo, reading type, duration, total charged, session end reason
+•	If ended due to low balance: 'Your balance ran out' message with 'Add Funds' button
+Rating Prompt
+•	5-star rating selector — shown once after session summary, can be skipped
+•	Optional text review field, max 1000 characters
+•	Submitted to POST /api/readings/:id/rate
+
+8.9 Platform Permissions & App Store Compliance
+🚨  Failure to implement these requirements will result in App Store rejection. These are not optional.
+8.9.1 iOS Requirements
+•	Microphone: NSMicrophoneUsageDescription in Info.plist — 'SoulSeer uses your microphone for live voice and video readings with spiritual readers.'
+•	Camera: NSCameraUsageDescription — 'SoulSeer uses your camera for live video readings with spiritual readers.'
+•	Background audio: UIBackgroundModes = ['audio'] in Info.plist. AVAudioSession category: .playAndRecord, mode: .voiceChat.
+•	Background video: video transmission pauses when app goes to background — audio continues. Video resumes on foreground return.
+•	In-app purchases: the 'Add Funds' balance top-up must be carefully reviewed against App Store guideline 3.1.1 before launch — if it flows through Apple Pay natively, Apple takes 30%.
+8.9.2 Android Requirements
+•	RECORD_AUDIO and CAMERA in AndroidManifest.xml — runtime permission requests required
+•	Foreground service required to keep audio session alive in background — must show a persistent notification: 'SoulSeer reading in progress — X minutes elapsed.'
+8.9.3 Permission Denied Handling
+•	If microphone denied: show explanation screen with button to open device Settings — do not crash
+•	If camera denied: allow voice and chat readings to proceed — only block video readings
+•	Never request permissions at app launch — only when the user is about to join a session
+
+8.10 Error Handling — Every Failure Mode
+Failure	When It Happens	Required Handling
+Token fetch fails	Network error calling agora-token endpoint	Retry up to 3 times with exponential backoff. If all fail, show error and return to dashboard.
+Agora join fails	Invalid token, network timeout, channel error	Show user-friendly message with Agora error code in logs. Offer retry.
+Billing tick DB error	DB connection lost during charging	Log error. Do not notify user. Retry next tick. If 3 consecutive failures, end session safely.
+Reader drops mid-session	Reader loses connection	Start grace period. Notify client. Client UI shows reconnecting state.
+Client drops mid-session	Client loses connection	Start grace period. Notify reader.
+Server restart mid-session	Deployment or crash	On restart, query for in_progress readings, charge elapsed minutes, mark completed.
+Agora token expires mid-session	Session exceeds 1 hour	Client silently calls token refresh endpoint. Renew without interrupting the session.
+
+
+8.11 Testing Requirements Before Launch
+🚨  The reading system cannot be launched without passing every test scenario listed here. A billing bug in production is a financial and reputational emergency.
+8.11.1 Billing Accuracy Tests
+•	Run a chat session for exactly 3 minutes. Verify client charged exactly 3x pricePerMinute. Verify reader received exactly 3x Math.floor(pricePerMinute * 0.70).
+•	Start a session. Kill the client app after 2 minutes. Rejoin within grace period. Continue 1 more minute. End. Verify total billed = 3 minutes, grace period not charged.
+•	Start a session with client balance equal to exactly 2 minutes' worth. Verify low balance warning fires. Let balance exhaust. Verify session ends automatically and client is not overdrawn.
+•	Call POST /api/readings/:id/start twice rapidly. Verify only one billing timer starts and client is not double-charged.
+•	Call POST /api/readings/:id/end twice rapidly. Verify reading is only finalized once.
+8.11.2 Connection Tests
+•	Start a voice reading. Put client phone in airplane mode for 90 seconds (within grace period). Restore. Verify session resumes and billing continues correctly.
+•	Start a voice reading. Put client phone in airplane mode for 3 minutes (past grace period). Verify session finalized for billed minutes only.
+•	Start a video reading. Background the app. Verify audio continues and video pauses. Foreground the app. Verify video resumes.
+8.11.3 Platform Tests
+•	Test all three reading types (chat, voice, video) on a physical iOS device
+•	Test all three reading types on a physical Android device
+•	Test all three reading types in a desktop web browser (Chrome, Safari)
+•	Test the Add Funds flow end-to-end with a real Stripe test card
+•	Test the full reading lifecycle with real Agora credentials in a staging environment — never launch using demo credentials
+•	Test with two physical devices in the same room to verify audio/video quality and latency
+
+8.12 Post-Session Features
+8.12.1 Chat Transcript
+•	Chat transcripts stored in the readings table as a jsonb array of { senderId, senderName, content, timestamp } objects
+•	Built during the session by the POST /api/readings/:id/message endpoint — every message appended
+•	Viewable by both client and reader in reading history — accessible indefinitely, never editable
+8.12.2 Ratings and Reviews
+•	Only the client can rate a reading — readers do not rate clients
+•	Rating: 1 to 5 stars, integer only. A client can only rate a given reading once.
+•	Reviews displayed publicly on the reader's profile — show star rating, review text, date (no client identifying information)
+•	Reader's overall star rating is the average of all ratings — recalculated and stored on the reader's user record after every new submission
+8.12.3 Session History
+•	Both clients and readers can view reading history in their dashboard
+•	Each entry shows: date, reading type, duration, total cost (client) or total earned (reader), star rating
+•	Chat transcript viewable from history for chat sessions
+•	Paginated — 20 sessions per page, newest first
+The pay-per-minute reading system is not a feature. It is SoulSeer. It is the reason readers joined the platform, the reason clients download the app, and the reason the business generates revenue. Every decision made while building this system must be made with that weight in mind.
+🚨  Do not mark Section 8 as complete until every subsection has been implemented, every test in 8.11 has passed on real devices, and the full reading lifecycle has been run end-to-end with real Agora credentials and a real Stripe test payment. There is no partial credit for a broken billing system.
+
+ 
+9. Dashboards
+9.1 Client Dashboard
+•	Account balance — prominently displayed with 'Add Funds' button
+•	Reading history — completed readings with reader name, date, duration, cost, and their review
+•	Upcoming/active readings — any pending or in-progress sessions
+•	Transaction history — itemized list of balance top-ups and reading charges
+•	Messages inbox — unread count badge, link to /messages
+9.2 Reader Dashboard
+•	Online/offline toggle — clearly visible, easy to switch
+•	Per-minute rate settings — set individually for chat, voice, and video
+•	Earnings summary — today's earnings, total pending payout balance, historical earnings
+•	Session history — completed readings with client (shown as 'Client #[id]' for privacy), date, duration, earnings
+•	Reviews received — star ratings and written reviews from clients
+•	Messages inbox — unread count badge, link to /messages
+9.3 Admin Dashboard
+⚠️  This is the control hub. Build it completely and securely.
+•	User list — all clients and readers with account details and balance
+•	Create reader — form: full name, email, username, bio, specialties, per-type rates, profile image upload, generate initial password
+•	Edit reader — update any reader profile field including profile image
+•	All readings — searchable list of all sessions with status, participants, duration, revenue
+•	Transaction ledger — all balance top-ups, reading charges, and paid messages platform-wide
+•	Manual balance adjustment — add or deduct balance from any user account with reason logged
+•	Forum moderation — view and delete any forum post or comment
+
+10. Community Hub (/community)
+10.1 Community Links
+•	Prominent button: 'Join our Facebook Group' — links to SoulSeer Facebook community (opens new tab)
+•	Prominent button: 'Join our Discord Server' — links to SoulSeer Discord (opens new tab)
+•	Brief description of each community and what members can expect
+•	These same links appear on the home page
+10.2 Public Forum
+•	Anyone can read posts — no login required to browse
+•	Login required to post or comment
+•	Posts have: title, body text, author display name, timestamp, comment count
+•	Comments are threaded one level deep (replies to posts, not to other comments)
+•	Pagination: 10 posts per page, ordered newest first
+•	Categories: General, Readings, Spiritual Growth, Ask a Reader, Announcements
+•	Announcements category: only admins can create posts, everyone can comment
+10.3 Forum Moderation
+•	Any user can flag a post or comment as inappropriate
+•	Flagged content goes to an admin review queue in the admin dashboard
+•	Admin can delete any post or comment
+•	No automated content scanning required in this phase — manual moderation only
+
+11. Payment & Balance System
+⚠️  Clients prepay by adding funds to their account balance. They only spend what they use, calculated as minutes × reader's per-minute rate.
+11.1 Adding Funds (Stripe)
+•	Stripe Payment Element used for card collection — PCI compliant, no raw card data touches server
+•	Preset amounts offered: $10, $25, $50, $100 — plus a custom amount input. Minimum top-up: $5.
+•	On Stripe payment_intent.succeeded webhook: credit user's accountBalance in DB
+•	Stripe webhook endpoint must verify signature using Stripe-Signature header — never skip this
+•	Balance stored in cents (integer) in DB — never store as float
+11.2 Revenue Split
+•	70% of each reading's cost goes to the reader's accountBalance
+•	30% is retained by the platform
+•	Split calculated and applied server-side at each billing tick and at session close
+•	Use integer math only — Math.floor(amount * 0.70) for reader share
+11.3 Reader Payouts (Stripe Connect)
+•	Each reader has a Stripe Connect Express account created when admin creates their profile
+•	Admin triggers payouts manually via admin dashboard (automated scheduling is a future phase feature)
+•	Payout threshold: reader must have $15 or more in accountBalance to be paid out
+•	On payout: transfer reader's accountBalance to their Stripe Connect account, reset accountBalance to 0
+•	Stripe Connect onboarding link generated and sent to reader after account creation
+11.4 Financial Security
+•	All balance operations use DB transactions — never update two balances in separate queries
+•	Every financial operation logged with: userId, type, amount, timestamp, readingId (if applicable)
+•	Double-deduction prevention: check reading status before processing payment — do not process if already marked 'paid'
+•	Refund capability in admin dashboard for disputed sessions
+
+12. API Route Reference
+All routes prefixed with /api. All routes except those marked Public require a valid Auth0 JWT in the Authorization header.
+12.1 Auth
+Method	Route	Access	Purpose
+POST	/api/auth/sync	Authenticated	Sync Auth0 user to internal DB on first login
+GET	/api/auth/me	Authenticated	Return current user profile
+
+12.2 Users & Readers
+Method	Route	Access	Purpose
+GET	/api/readers	Public	All reader profiles
+GET	/api/readers/online	Public	Online readers only
+GET	/api/readers/:id	Public	Single reader profile
+PATCH	/api/readers/status	Reader	Toggle online/offline
+PATCH	/api/readers/pricing	Reader	Update per-type rates
+PATCH	/api/readers/profile	Reader	Update bio and specialties
+GET	/api/user/balance	Authenticated	Current user balance
+
+12.3 Readings
+Method	Route	Access	Purpose
+POST	/api/readings/on-demand	Client	Create reading request
+POST	/api/readings/:id/accept	Reader	Reader accepts request
+POST	/api/readings/:id/agora-token	Participant	Get Agora RTC/RTM token
+POST	/api/readings/:id/start	Participant	Mark both joined, start billing
+POST	/api/readings/:id/end	Participant	End session, finalize billing
+POST	/api/readings/:id/rate	Client	Submit rating and review
+GET	/api/readings/client	Client	Client's reading history
+GET	/api/readings/reader	Reader	Reader's session history
+GET	/api/readings/:id	Participant	Single reading detail
+
+12.4 Payments
+Method	Route	Access	Purpose
+POST	/api/payments/create-intent	Authenticated	Create Stripe PaymentIntent for top-up
+POST	/api/webhooks/stripe	Public (Stripe only)	Handle payment_intent.succeeded — verify signature
+GET	/api/transactions	Authenticated	User's transaction history
+
+12.5 Messages
+Method	Route	Access	Purpose
+GET	/api/messages/conversations	Authenticated	List all conversations for current user
+GET	/api/messages/:userId	Authenticated	Full message thread between current user and :userId
+POST	/api/messages/:userId	Client	Send a new message to a reader
+POST	/api/messages/:userId/reply	Reader	Send a reply — free or paid
+POST	/api/messages/:id/unlock	Client	Pay to unlock a paid reply
+PATCH	/api/messages/:id/read	Authenticated	Mark message as read
+GET	/api/messages/unread-count	Authenticated	Total unread count for nav badge
+
+12.6 Community Forum
+Method	Route	Access	Purpose
+GET	/api/forum/posts	Public	Paginated post list
+POST	/api/forum/posts	Authenticated	Create post
+GET	/api/forum/posts/:id	Public	Single post with comments
+POST	/api/forum/posts/:id/comments	Authenticated	Add comment
+POST	/api/forum/posts/:id/flag	Authenticated	Flag post
+DELETE	/api/forum/posts/:id	Admin	Delete post
+DELETE	/api/forum/comments/:id	Admin	Delete comment
+
+12.7 Admin
+Method	Route	Access	Purpose
+GET	/api/admin/users	Admin	All users
+POST	/api/admin/readers	Admin	Create reader account
+PATCH	/api/admin/readers/:id	Admin	Edit reader profile
+GET	/api/admin/readings	Admin	All readings platform-wide
+GET	/api/admin/transactions	Admin	Full transaction ledger
+POST	/api/admin/balance-adjust	Admin	Manual balance adjustment
+POST	/api/admin/payouts/:readerId	Admin	Trigger reader payout
+GET	/api/admin/forum/flagged	Admin	Flagged content queue
+
+
+13. Database Schema Overview
+Database: Neon (serverless Postgres). ORM: Drizzle. All schema defined in /shared/schema.ts.
+13.1 Core Tables
+•	users — id, auth0Id, email, username, fullName, role, bio, specialties, profileImage, pricingChat, pricingVoice, pricingVideo, accountBalance, isOnline, stripeAccountId, stripeCustomerId, createdAt
+•	readings — id, readerId, clientId, type, status, pricePerMinute, channelName, startedAt, completedAt, duration, totalPrice, paymentStatus, chatTranscript (jsonb), rating, review
+•	transactions — id, userId, type ('top_up' | 'reading_charge' | 'paid_message' | 'payout' | 'adjustment'), amount, balanceBefore, balanceAfter, readingId (nullable), messageId (nullable), stripeId (nullable), note, createdAt
+•	messages — id, senderId, receiverId, content, isPaid, price, readerAmount, platformAmount, isUnlocked, unlockedAt, createdAt, readAt
+•	forum_posts — id, userId, title, content, category, flagCount, createdAt
+•	forum_comments — id, postId, userId, content, flagCount, createdAt
+•	forum_flags — id, postId (nullable), commentId (nullable), reporterId, reason, reviewedAt (nullable)
+13.2 Drizzle ORM Rules
+•	All monetary values stored as integers (cents) — never DECIMAL or FLOAT
+•	All timestamps stored as timestamp with timezone
+•	Foreign keys defined with .references() — enforce referential integrity
+•	Use Drizzle transactions (db.transaction()) for any operation that touches two or more tables
+
+14. Security Requirements
+⚠️  These are non-negotiable. Every item on this list must be implemented before launch.
+14.1 Authentication & Authorization
+•	All protected routes validate the Auth0 JWT on every request — no exceptions
+•	Role checked server-side on every admin and reader route — never trust role from client
+•	Reading session routes verify the requesting user is an actual participant (clientId or readerId)
+•	Message routes verify the requesting user is the sender or receiver of that message
+•	Paid message unlock route verifies the requesting user is the message's receiverId
+14.2 Input Validation
+•	All API request bodies validated with Zod schemas before processing
+•	Numeric inputs sanitized — check for NaN, negative values, unreasonably large values
+•	String inputs sanitized — max length enforced, HTML stripped where applicable
+•	File uploads (reader images via admin): type check (jpeg/png/webp only), size limit 5MB
+14.3 Payment Security
+•	Stripe webhook endpoint verifies Stripe-Signature header on every request using stripe.webhooks.constructEvent()
+•	Never credit balance from client-reported amounts — only from verified Stripe webhook events
+•	Paid message content must NEVER appear in any API response until isUnlocked = true — enforce at the query/serialization layer, not the frontend
+•	Prevent double-unlock: check isUnlocked = false before processing payment, wrapped in a DB transaction
+14.4 API Hardening
+•	Rate limiting on all public endpoints using express-rate-limit
+•	Stricter rate limits on auth, payment, reading creation, and message send endpoints
+•	Helmet.js for HTTP security headers on all routes
+•	CORS configured to allow only your frontend domain
+•	No sensitive data (Stripe keys, Agora secrets) ever logged or returned in API responses
+•	Environment variables for all secrets — never hardcoded
+14.5 Data Privacy
+•	No passwords stored in your DB — readers authenticate via Auth0
+•	GDPR/CCPA: include a privacy policy page (static) and honor account deletion requests
+•	Admin ability to view message threads for dispute resolution must be disclosed in the privacy policy
+
+15. Error Handling & Reliability
+15.1 Server Error Handling
+•	Global Express error handler catches all unhandled errors and returns structured JSON
+•	Never expose stack traces or internal error messages to the client in production
+•	All async route handlers wrapped in try/catch — no unhandled promise rejections
+•	Billing timer errors must be caught and logged — a billing failure must not silently lose money
+15.2 Client Error Handling
+•	Toast notifications for all user-facing errors with clear, plain-language messages
+•	Agora connection errors show a reconnection attempt UI, not a blank screen
+•	Low balance detected before session start — show top-up prompt, never let session start with insufficient funds
+15.3 Logging
+•	All server errors logged with: timestamp, route, userId (if authenticated), error message
+•	All financial operations logged with full details
+•	Use a structured logging library (pino or winston) — not raw console.log in production
+
+16. Implementation Order
+⚠️  Complete each phase fully before moving to the next. Do not scaffold future features.
+18.	Core infrastructure — monorepo setup, TypeScript config, Neon DB connection, Drizzle schema, environment variables
+19.	Auth0 integration — login, logout, JWT validation middleware, user sync on first login, role enforcement
+20.	User system — reader profiles, admin dashboard reader creation with image upload, online/offline toggle, pricing
+21.	Stripe payment integration — balance top-up flow, webhook handler with signature verification, transaction logging
+22.	Agora integration — token generation server, Agora RTC + RTM client setup, channel join/leave
+23.	Reading system — on-demand request flow, server-side billing, grace period disconnect handling, session UI for all three types
+24.	Post-session — rating and review submission, transcript storage and display, session summaries
+25.	Client and reader dashboards — balance display, reading history, earnings, review history
+26.	Direct messaging — send/receive, paid reply flow, unlock flow, conversation inbox
+27.	Community hub — forum (posts, comments, pagination, categories, flagging), community links
+28.	Admin dashboard completion — transaction ledger, payout trigger, forum moderation, manual balance adjustment
+29.	Home page — online readers display, newsletter signup, community links, hero image, full design polish
+30.	Security hardening — rate limiting, Helmet.js, CORS, full input validation audit
+31.	QA — test all user flows, edge cases (low balance, disconnect, billing errors), mobile responsiveness on real devices
+
+17. About Page (Verbatim Content)
+⚠️  Use the exact text below on the About page. Do not paraphrase or rewrite.
+At SoulSeer, we are dedicated to providing ethical, compassionate, and judgment-free spiritual guidance. Our mission is twofold: to offer clients genuine, heart-centered readings and to uphold fair, ethical standards for our readers.
+Founded by psychic medium Emilynn, SoulSeer was created as a response to the corporate greed that dominates many psychic platforms. Unlike other apps, our readers keep the majority of what they earn and play an active role in shaping the platform.
+SoulSeer is more than just an app — it's a soul tribe. A community of gifted psychics united by our life's calling: to guide, heal, and empower those who seek clarity on their journey.
+•	Founder image: https://i.postimg.cc/s2ds9RtC/FOUNDER.jpg
+
+18. Client–Reader Direct Messaging
+Outside of live reading sessions, clients can send direct messages to any reader on the platform at no cost. The reader then decides — per reply — whether their response is free or paid. If the reader marks a response as paid, the client must approve and pay that price before the message is revealed.
+⚠️  This is an outside-of-session feature only. It is completely separate from the Agora RTM chat that occurs during a live reading session. Do not conflate the two systems.
+18.1 How It Works — User Flow
+Client Sends a Message
+•	Client navigates to any reader profile page and clicks 'Send Message', or accesses the Messages section in their dashboard
+•	Client can message any reader regardless of whether that reader is online
+•	Sending a message is always free for the client
+•	Client types their message (plain text, max 2000 characters) and submits
+•	Message is delivered to the reader's message inbox
+Reader Receives and Replies
+•	Reader sees the incoming message in their dashboard inbox with client's display name and message content
+•	Reader composes their reply and before sending chooses one of two options:
+◦	Send as Free — reply is delivered immediately at no charge to the client
+◦	Send as Paid — reader sets a price for this specific reply (minimum $1, maximum $500, whole dollars only)
+•	Paid reply content is stored server-side but not revealed to the client until payment is made
+Client Receives a Paid Reply
+•	Client sees in the thread: 'Reader Name has sent you a paid message — $X.XX to unlock'
+•	Client sees the price but NOT the content until they pay
+•	Client clicks 'Unlock Message' — system checks their account balance
+•	If sufficient balance: amount deducted from client's accountBalance and reply is immediately revealed
+•	If insufficient balance: client is shown a prompt to add funds before they can unlock
+•	Client cannot be charged without explicitly clicking 'Unlock Message' — no auto-charges
+18.2 Reader Controls & Settings
+•	Readers can set a default reply type preference in their dashboard: 'Always Free' or 'Always Paid with default price' — pre-fills the reply form but can be overridden per message
+•	Readers can set a default paid reply price that pre-populates when they choose paid
+•	Readers can view which of their paid replies have been unlocked vs. still pending payment
+18.3 Revenue Split for Paid Replies
+•	Same 70/30 split as readings: reader receives 70% of the paid reply price, platform retains 30%
+•	Example: reader sets $10 paid reply — client pays $10, reader earns $7, platform earns $3
+•	Reader's 70% credited to their accountBalance immediately upon client unlocking
+•	Transaction logged in the transactions table with type 'paid_message'
+⚠️  All balance operations for paid messages must use DB transactions — deduct from client and credit reader atomically, never in separate queries.
+18.4 Database Schema
+Field	Type	Notes
+id	integer PK	Auto-increment
+senderId	integer FK	References users — message author
+receiverId	integer FK	References users — message recipient
+content	text	Message body — always stored in full
+isPaid	boolean	False = free. True = paid reply.
+price	integer	Null if free. Price in cents if paid.
+readerAmount	integer	Null if free. Reader's 70% cut in cents.
+platformAmount	integer	Null if free. Platform's 30% cut in cents.
+isUnlocked	boolean	False = paid and not yet paid for. True = free or paid and unlocked.
+unlockedAt	timestamp	Null until client pays.
+createdAt	timestamp	When message was sent
+readAt	timestamp	Null until recipient views it
+
+🚨  Content is always stored in plain text server-side. The paid gate is enforced at the API level — the content field is stripped from the response until isUnlocked = true. Never rely on the client to hide content.
+18.5 Critical API Behavior Rules
+•	GET /api/messages/:userId — strip the content field from any row where isPaid = true AND isUnlocked = false. Replace with '[Paid message — $X.XX to unlock]'
+•	POST /api/messages/:userId/reply — only readers can call this. Validate price is between 100 and 50000 cents. Calculate and store readerAmount and platformAmount at write time, not at unlock time.
+•	POST /api/messages/:id/unlock — verify requesting user is the message's receiverId. Verify isPaid = true and isUnlocked = false (prevent double-unlock). Check balance. Deduct and credit atomically in a DB transaction. Set isUnlocked = true and unlockedAt = now(). Return full message content in the response.
+•	Rate limit: POST /api/messages/:userId — 20 messages per 5 minutes per user to prevent spam
+18.6 UI Requirements
+Messages Dashboard Section (both roles)
+•	Conversation list: sorted by most recent message, shows other party's name and profile photo, preview of last message, unread count badge, timestamp
+•	Unread message count displayed as a badge on the Messages nav link
+Thread View
+•	Messages displayed chronologically, oldest at top, newest at bottom
+•	Client messages on the right, reader messages on the left — standard chat layout
+•	Paid locked messages display as a blurred/greyed card with price and 'Unlock Message — $X.XX' button
+•	Paid unlocked messages display normally with a subtle 'Paid' label
+Reader Reply Composer
+•	Reply input plus a toggle: 'Free Reply' / 'Paid Reply'
+•	Selecting 'Paid Reply' reveals a price input — pre-filled with default paid reply price from settings
+•	Price input: whole dollars only. Minimum $1, maximum $500.
+•	Clear label before sending: 'Client will be charged $X.XX to read this reply'
+Unlock Flow (Client)
+•	If sufficient balance: single confirmation tap — 'Unlock for $X.XX from your balance' — message reveals inline without page reload
+•	If insufficient balance: open the Add Funds flow with required amount pre-filled, return to thread after funding
+•	Unlocked message reveals with a smooth animation — not a jarring page refresh
+18.7 Security
+•	Paid message content must NEVER appear in any API response to the client until isUnlocked = true — enforce at the query/serialization layer
+•	Only the message's receiverId can unlock a paid message — never allow a third party to unlock
+•	Only a reader can send a paid reply — clients cannot send paid messages
+•	Prevent double-unlock: check isUnlocked = false before processing payment in a DB transaction
+
+19. Deferred to Future Build Phase
+The following features are explicitly NOT part of this launch. Do not build, scaffold, or create placeholder routes for any of these.
+•	Live streaming and virtual gifting
+•	Marketplace and shop (physical and digital products)
+•	Scheduled/booked readings (fixed-price, calendar-based)
+•	Automated reader payout scheduling (manual only in this phase)
+•	Push notifications
+•	Email marketing integration
+•	PWA / offline functionality
+•	Availability calendar for readers
+•	Social sharing features
+⚠️  The codebase must be built with modular architecture so these features can be added cleanly in the next phase without requiring a rewrite of core systems.
