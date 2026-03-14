@@ -1,292 +1,131 @@
-// ============================================================
-// HelpPage — Searchable FAQ & contact info
-// ============================================================
+import { useState } from 'react';
+import { Card, Button, SearchInput } from '../components/ui';
 
-import { useState, useMemo } from 'react';
-
-interface FaqItem {
+interface FAQ {
   question: string;
   answer: string;
   category: string;
 }
 
-const FAQ_DATA: FaqItem[] = [
-  {
-    category: 'Getting Started',
-    question: 'How do I get a reading?',
-    answer:
-      'Browse our Readers page to find a psychic that resonates with you. Check their specialties, read reviews, and when they\'re online, click "Start Reading" to begin a chat, voice, or video session.',
-  },
-  {
-    category: 'Getting Started',
-    question: 'Do I need an account to get a reading?',
-    answer:
-      'Yes, you\'ll need to create a free account and add funds to your balance before starting a reading. Sign up takes just a moment through our secure authentication.',
-  },
-  {
-    category: 'Pricing & Payments',
-    question: 'How does pricing work?',
-    answer:
-      'Readings are billed per minute. Each reader sets their own rates for chat, voice, and video sessions. You can see their rates on their profile before starting. Your balance is deducted in real time during the session.',
-  },
-  {
-    category: 'Pricing & Payments',
-    question: 'How do I add funds to my account?',
-    answer:
-      'Go to your Dashboard and click "Add Funds." We accept all major credit and debit cards through our secure payment processor, Stripe.',
-  },
-  {
-    category: 'Pricing & Payments',
-    question: 'What happens if my balance runs out during a reading?',
-    answer:
-      'You\'ll receive a low balance warning when you have less than 2 minutes of session time remaining. If your balance reaches zero, the session will end automatically. Make sure to top up before or during your reading!',
-  },
-  {
-    category: 'Readings',
-    question: 'What types of readings are available?',
-    answer:
-      'We offer three types: Chat (text-based), Voice (audio call), and Video (face-to-face). Not all readers offer every type — check their profile for available options.',
-  },
-  {
-    category: 'Readings',
-    question: 'How do I know if a reader is available?',
-    answer:
-      'Readers who are currently online and available show a green "Online" badge on their profile. The home page also displays currently online readers.',
-  },
-  {
-    category: 'Readings',
-    question: 'Can I leave a review after a reading?',
-    answer:
-      'Yes! After your reading is completed, you\'ll be able to rate your experience and leave a written review. Reviews help other clients find great readers.',
-  },
-  {
-    category: 'Account',
-    question: 'How do I become a reader on SoulSeer?',
-    answer:
-      'We welcome gifted psychics to our community! Contact our team through the support email below. We\'ll review your application and, if approved, set up your reader profile.',
-  },
-  {
-    category: 'Account',
-    question: 'How do readers get paid?',
-    answer:
-      'Readers keep the majority of their earnings. Payouts are processed regularly through Stripe. Reader earnings are tracked in real time on the Reader Dashboard.',
-  },
-  {
-    category: 'Community',
-    question: 'What is the Community Hub?',
-    answer:
-      'The Community Hub is our forum where members discuss spiritual topics, share experiences, ask readers questions, and connect with like-minded souls. Anyone can read posts, but you need an account to comment.',
-  },
-  {
-    category: 'Technical',
-    question: 'What devices can I use SoulSeer on?',
-    answer:
-      'SoulSeer works on any modern web browser — Chrome, Safari, Firefox, or Edge on desktop, tablet, or mobile. For voice and video readings, make sure your microphone and camera permissions are enabled.',
-  },
-  {
-    category: 'Technical',
-    question: 'Is my information secure?',
-    answer:
-      'Absolutely. We use Auth0 for secure authentication and Stripe for payment processing. Your personal data and financial information are encrypted and never shared.',
-  },
+const FAQS: FAQ[] = [
+  { category: 'Getting Started', question: 'How do I get a reading?', answer: 'Browse our readers, choose one who resonates with you, select a reading type (chat, voice, or video), ensure you have funds in your account, and start your session.' },
+  { category: 'Getting Started', question: 'What types of readings are available?', answer: 'We offer three types: Chat (text-based), Voice (audio call), and Video (video call). Each reader sets their own rates for the types they offer.' },
+  { category: 'Billing', question: 'How does billing work?', answer: 'Readings are billed per minute at the reader\'s set rate. You need a minimum balance of $5.00 to start a session. Billing begins when both parties are connected.' },
+  { category: 'Billing', question: 'How do I add funds?', answer: 'Go to your Dashboard → Add Funds tab. Choose a preset amount or enter a custom amount. Payments are processed securely through Stripe.' },
+  { category: 'Billing', question: 'Can I get a refund?', answer: 'If you experience technical issues during a reading, contact our support team. We review each case individually and may offer a full or partial refund.' },
+  { category: 'Readings', question: 'What if my reader goes offline during a session?', answer: 'If a reader disconnects unexpectedly, you\'ll only be charged for the time you were connected. Any issues can be reported to our support team.' },
+  { category: 'Readings', question: 'Are readings private?', answer: 'Absolutely. All reading sessions are private between you and your reader. We do not record, store, or share session content.' },
+  { category: 'Account', question: 'How do I become a reader?', answer: 'Reader accounts are created by our admin team. If you\'re interested in becoming a SoulSeer reader, contact us at support@soulseer.app.' },
+  { category: 'Account', question: 'How do I change my password?', answer: 'Password management is handled through Auth0. Click "Sign In" and use the "Forgot Password" option on the login page.' },
+  { category: 'Community', question: 'How does the community forum work?', answer: 'The community hub is a space to share experiences, ask questions, and connect with other seekers and readers. Create posts, reply to discussions, and engage respectfully.' },
 ];
-
-const CATEGORIES = [...new Set(FAQ_DATA.map((f) => f.category))];
 
 export function HelpPage() {
   const [search, setSearch] = useState('');
   const [openIndex, setOpenIndex] = useState<number | null>(null);
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
-  const filteredFaq = useMemo(() => {
-    let items = FAQ_DATA;
-    if (selectedCategory) {
-      items = items.filter((f) => f.category === selectedCategory);
-    }
-    if (search.trim()) {
-      const lower = search.toLowerCase();
-      items = items.filter(
+  const filtered = search
+    ? FAQS.filter(
         (f) =>
-          f.question.toLowerCase().includes(lower) ||
-          f.answer.toLowerCase().includes(lower)
-      );
-    }
-    return items;
-  }, [search, selectedCategory]);
+          f.question.toLowerCase().includes(search.toLowerCase()) ||
+          f.answer.toLowerCase().includes(search.toLowerCase())
+      )
+    : FAQS;
+
+  const categories = [...new Set(filtered.map((f) => f.category))];
 
   return (
-    <div className="page-content page-enter">
-      <div className="container" style={{ maxWidth: '800px' }}>
-        <section style={{ textAlign: 'center', padding: '40px 0 32px' }}>
-          <h1>Help &amp; FAQ</h1>
-          <p style={{ marginTop: '12px', maxWidth: '500px', margin: '12px auto 0' }}>
-            Find answers to common questions about SoulSeer.
+    <div className="page-wrapper page-enter">
+      <section className="section">
+        <div className="container container--narrow">
+          <h1 className="text-center" style={{ marginBottom: 'var(--space-2)' }}>
+            Help Center
+          </h1>
+          <p className="text-center" style={{ marginBottom: 'var(--space-8)', color: 'var(--text-muted)' }}>
+            Find answers to common questions
           </p>
-        </section>
 
-        {/* Search */}
-        <div style={{ marginBottom: '24px' }}>
-          <input
-            type="text"
-            placeholder="Search questions..."
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setOpenIndex(null); }}
-            style={{ fontSize: '1rem' }}
-            aria-label="Search FAQ"
-          />
-        </div>
-
-        {/* Category filters */}
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '28px' }}>
-          <button
-            className={`btn btn-sm ${!selectedCategory ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => { setSelectedCategory(null); setOpenIndex(null); }}
-          >
-            All
-          </button>
-          {CATEGORIES.map((cat) => (
-            <button
-              key={cat}
-              className={`btn btn-sm ${selectedCategory === cat ? 'btn-primary' : 'btn-ghost'}`}
-              onClick={() => { setSelectedCategory(cat); setOpenIndex(null); }}
-            >
-              {cat}
-            </button>
-          ))}
-        </div>
-
-        {/* FAQ Accordion */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {filteredFaq.length === 0 ? (
-            <div className="empty-state">
-              <p>No questions match your search.</p>
-            </div>
-          ) : (
-            filteredFaq.map((item, idx) => (
-              <div
-                key={idx}
-                className="card-static"
-                style={{
-                  padding: 0,
-                  overflow: 'hidden',
-                  cursor: 'pointer',
-                  border:
-                    openIndex === idx
-                      ? '1px solid var(--border-gold)'
-                      : '1px solid var(--border-subtle)',
-                }}
-                onClick={() => setOpenIndex(openIndex === idx ? null : idx)}
-              >
-                <div
-                  style={{
-                    padding: '16px 20px',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    gap: '12px',
-                  }}
-                >
-                  <div>
-                    <span
-                      className="badge badge-gold"
-                      style={{ fontSize: '0.6rem', marginBottom: '6px' }}
-                    >
-                      {item.category}
-                    </span>
-                    <h4
-                      style={{
-                        fontSize: '0.95rem',
-                        fontWeight: 600,
-                        color:
-                          openIndex === idx
-                            ? 'var(--primary-pink)'
-                            : 'var(--text-light)',
-                      }}
-                    >
-                      {item.question}
-                    </h4>
-                  </div>
-                  <span
-                    style={{
-                      color: 'var(--text-light-muted)',
-                      fontSize: '1.2rem',
-                      transition: 'transform 0.2s',
-                      transform: openIndex === idx ? 'rotate(180deg)' : 'none',
-                      flexShrink: 0,
-                    }}
-                  >
-                    ▾
-                  </span>
-                </div>
-
-                {openIndex === idx && (
-                  <div
-                    style={{
-                      padding: '0 20px 16px',
-                      borderTop: '1px solid var(--border-subtle)',
-                      paddingTop: '14px',
-                    }}
-                  >
-                    <p style={{ fontSize: '0.9rem', lineHeight: 1.7 }}>{item.answer}</p>
-                  </div>
-                )}
-              </div>
-            ))
-          )}
-        </div>
-
-        <div className="divider" />
-
-        {/* Contact Section */}
-        <section style={{ textAlign: 'center', padding: '16px 0 60px' }}>
-          <h2 style={{ marginBottom: '16px' }}>Still Need Help?</h2>
-          <p style={{ marginBottom: '24px' }}>
-            Our support team is here to assist you on your spiritual journey.
-          </p>
-          <div
-            className="card-static"
-            style={{
-              display: 'inline-flex',
-              flexDirection: 'column',
-              gap: '12px',
-              padding: '24px 32px',
-              textAlign: 'left',
-            }}
-          >
-            <div>
-              <span style={{ color: 'var(--text-light-muted)', fontSize: '0.85rem' }}>
-                Email
-              </span>
-              <p style={{ color: 'var(--accent-gold)', fontWeight: 600 }}>
-                support@soulseer.app
-              </p>
-            </div>
-            <div>
-              <span style={{ color: 'var(--text-light-muted)', fontSize: '0.85rem' }}>
-                Community
-              </span>
-              <div style={{ display: 'flex', gap: '12px', marginTop: '6px' }}>
-                <a
-                  href="https://www.facebook.com/groups/soulseer"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ color: 'var(--primary-pink)', fontSize: '0.9rem' }}
-                >
-                  Facebook Group
-                </a>
-                <a
-                  href="https://discord.gg/soulseer"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ color: 'var(--primary-pink)', fontSize: '0.9rem' }}
-                >
-                  Discord
-                </a>
-              </div>
-            </div>
+          <div style={{ marginBottom: 'var(--space-8)' }}>
+            <SearchInput
+              value={search}
+              onChange={setSearch}
+              placeholder="Search for help..."
+            />
           </div>
-        </section>
-      </div>
+
+          {categories.map((cat) => (
+            <div key={cat} style={{ marginBottom: 'var(--space-6)' }}>
+              <h3 style={{ marginBottom: 'var(--space-3)', color: 'var(--accent-gold)' }}>{cat}</h3>
+              <div className="flex flex-col gap-2">
+                {filtered
+                  .filter((f) => f.category === cat)
+                  .map((faq, i) => {
+                    const globalIdx = FAQS.indexOf(faq);
+                    const isOpen = openIndex === globalIdx;
+                    return (
+                      <Card key={i} variant="static">
+                        <button
+                          className="faq-toggle"
+                          onClick={() => setOpenIndex(isOpen ? null : globalIdx)}
+                          aria-expanded={isOpen}
+                          style={{
+                            width: '100%',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            background: 'none',
+                            border: 'none',
+                            color: 'var(--text-primary)',
+                            padding: 0,
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                            fontSize: '0.95rem',
+                            textAlign: 'left',
+                          }}
+                        >
+                          {faq.question}
+                          <span style={{ opacity: 0.5, marginLeft: '8px' }}>
+                            {isOpen ? '−' : '+'}
+                          </span>
+                        </button>
+                        {isOpen && (
+                          <p style={{
+                            marginTop: 'var(--space-3)',
+                            color: 'var(--text-secondary)',
+                            lineHeight: 1.8,
+                            fontSize: '0.9rem',
+                          }}>
+                            {faq.answer}
+                          </p>
+                        )}
+                      </Card>
+                    );
+                  })}
+              </div>
+            </div>
+          ))}
+
+          {filtered.length === 0 && (
+            <div className="empty-state">
+              <div className="empty-state__icon">🔍</div>
+              <h3 className="empty-state__title">No Results</h3>
+              <p className="empty-state__text">Try different search terms or browse all categories.</p>
+              <Button variant="secondary" onClick={() => setSearch('')}>Clear Search</Button>
+            </div>
+          )}
+
+          {/* Contact */}
+          <Card variant="glow-gold" className="text-center" style={{ marginTop: 'var(--space-8)' }}>
+            <h3 style={{ marginBottom: 'var(--space-2)' }}>Still Need Help?</h3>
+            <p style={{ color: 'var(--text-muted)', marginBottom: 'var(--space-4)' }}>
+              Our support team is here for you.
+            </p>
+            <a href="mailto:support@soulseer.app">
+              <Button variant="gold">Contact Support</Button>
+            </a>
+          </Card>
+        </div>
+      </section>
     </div>
   );
 }

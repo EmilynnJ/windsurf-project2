@@ -1,349 +1,296 @@
-// ============================================================
-// ReaderDashboard — Online toggle, pricing, earnings, sessions, reviews
-// ============================================================
-
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../../components/ToastProvider';
-import { readersApi, readingsApi, balanceApi } from '../../services/api';
-import type { ReadingWithUsers, Transaction } from '../../types';
+import { apiService } from '../../services/api';
+import {
+  Button, Card, Stat, Tabs, TabPanel, Table, Badge,
+  StarRating, LoadingPage, EmptyState,
+} from '../../components/ui';
+import type { Column } from '../../components/ui/Table';
 
-function formatCents(cents: number): string {
-  return `$${(cents / 100).toFixed(2)}`;
+function centsToPrice(c: number): string {
+  return `$${(c / 100).toFixed(2)}`;
 }
 
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
+interface SessionRecord {
+  id: number;
+  clientId: number;
+  type: string;
+  status: string;
+  duration: number;
+  readerEarnings: number;
+  rating: number | null;
+  review: string | null;
+  createdAt: string;
+  [key: string]: unknown;
 }
+
+const tabList = [
+  { id: 'overview', label: '✨ Overview' },
+  { id: 'sessions', label: '📖 Sessions' },
+  { id: 'reviews', label: '⭐ Reviews' },
+  { id: 'settings', label: '⚙️ Settings' },
+];
 
 export function ReaderDashboard() {
   const { user, refreshUser } = useAuth();
   const { addToast } = useToast();
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'sessions' | 'earnings' | 'settings'>('overview');
+  const [activeTab, setActiveTab] = useState('overview');
   const [isOnline, setIsOnline] = useState(user?.isOnline ?? false);
-  const [togglingOnline, setTogglingOnline] = useState(false);
-
-  // Pricing
-  const [pricingChat, setPricingChat] = useState(0);
-  const [pricingVoice, setPricingVoice] = useState(0);
-  const [pricingVideo, setPricingVideo] = useState(0);
+  const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [toggling, setToggling] = useState(false);
   const [savingPricing, setSavingPricing] = useState(false);
 
-  const [sessions, setSessions] = useState<ReadingWithUsers[]>([]);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [isLoadingSessions, setIsLoadingSessions] = useState(false);
-  const [isLoadingTransactions, setIsLoadingTransactions] = useState(false);
+  // Pricing state
+  const [chatRate, setChatRate] = useState(String((user?.pricingChat ?? 0) / 100));
+  const [voiceRate, setVoiceRate] = useState(String((user?.pricingVoice ?? 0) / 100));
+  const [videoRate, setVideoRate] = useState(String((user?.pricingVideo ?? 0) / 100));
 
-  // Load current pricing from user profile
-  useEffect(() => {
-    const loadPricing = async () => {
-      try {
-        const me = await readersApi.getReader(user?.id ?? 0);
-        setPricingChat(me.pricingChat);
-        setPricingVoice(me.pricingVoice);
-        setPricingVideo(me.pricingVideo);
-      } catch {
-        // Use defaults if we can't fetch
-      }
-    };
-    if (user?.id) loadPricing();
-  }, [user?.id]);
-
-  const handleToggleOnline = useCallback(async () => {
-    setTogglingOnline(true);
+  const fetchData = useCallback(async () => {
     try {
-      const newStatus = !isOnline;
-      await readersApi.toggleOnline(newStatus);
-      setIsOnline(newStatus);
-      addToast('success', newStatus ? "You're now online!" : "You're now offline.");
-      refreshUser();
+      const data = await apiService.get('/api/readings/reader').catch(() => []);
+      setSessions(data as SessionRecord[]);
+    } catch {
+      // silently handle
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  const toggleOnline = async () => {
+    setToggling(true);
+    try {
+      await apiService.patch('/api/readers/me/status', { isOnline: !isOnline });
+      setIsOnline(!isOnline);
+      addToast('success', `You are now ${!isOnline ? 'online' : 'offline'}`);
     } catch {
       addToast('error', 'Failed to update status');
     } finally {
-      setTogglingOnline(false);
+      setToggling(false);
     }
-  }, [isOnline, addToast, refreshUser]);
+  };
 
-  const handleSavePricing = useCallback(async () => {
+  const savePricing = async () => {
     setSavingPricing(true);
     try {
-      await readersApi.updatePricing({ pricingChat, pricingVoice, pricingVideo });
+      await apiService.patch('/api/readers/me/pricing', {
+        pricingChat: Math.round(parseFloat(chatRate || '0') * 100),
+        pricingVoice: Math.round(parseFloat(voiceRate || '0') * 100),
+        pricingVideo: Math.round(parseFloat(videoRate || '0') * 100),
+      });
       addToast('success', 'Pricing updated!');
+      refreshUser?.();
     } catch {
-      addToast('error', 'Failed to save pricing');
+      addToast('error', 'Failed to update pricing');
     } finally {
       setSavingPricing(false);
     }
-  }, [pricingChat, pricingVoice, pricingVideo, addToast]);
-
-  useEffect(() => {
-    if (activeTab === 'sessions') fetchSessions();
-    if (activeTab === 'earnings') fetchTransactions();
-  }, [activeTab]);
-
-  const fetchSessions = async () => {
-    setIsLoadingSessions(true);
-    try {
-      const result = await readingsApi.getHistory({ limit: 30 });
-      setSessions(result.readings);
-    } catch {
-      addToast('error', 'Failed to load sessions');
-    } finally {
-      setIsLoadingSessions(false);
-    }
   };
 
-  const fetchTransactions = async () => {
-    setIsLoadingTransactions(true);
-    try {
-      const result = await balanceApi.getTransactions({ limit: 30 });
-      setTransactions(result.transactions);
-    } catch {
-      addToast('error', 'Failed to load earnings');
-    } finally {
-      setIsLoadingTransactions(false);
-    }
-  };
+  const completedSessions = sessions.filter((s) => s.status === 'completed');
+  const totalEarnings = completedSessions.reduce((sum, s) => sum + (s.readerEarnings || 0), 0);
+  const reviewedSessions = completedSessions.filter((s) => s.rating !== null);
+  const avgRating = reviewedSessions.length > 0
+    ? reviewedSessions.reduce((sum, s) => sum + (s.rating || 0), 0) / reviewedSessions.length
+    : 0;
 
-  const totalEarnings = transactions
-    .filter((t) => t.type === 'reading_charge' && t.amount > 0)
-    .reduce((sum, t) => sum + t.amount, 0);
+  const sessionColumns: Column<SessionRecord>[] = [
+    { key: 'id', header: 'ID', width: '60px', sortable: true },
+    {
+      key: 'clientId', header: 'Client',
+      render: (s) => `Client #${s.clientId}`,
+    },
+    {
+      key: 'type', header: 'Type',
+      render: (s) => <Badge variant="pink">{s.type}</Badge>,
+    },
+    {
+      key: 'status', header: 'Status',
+      render: (s) => (
+        <Badge variant={s.status === 'completed' ? 'online' : s.status === 'in_progress' ? 'info' : 'gold'}>
+          {s.status}
+        </Badge>
+      ),
+    },
+    { key: 'duration', header: 'Duration', render: (s) => s.duration > 0 ? `${s.duration} min` : '—' },
+    {
+      key: 'readerEarnings', header: 'Earned', sortable: true,
+      render: (s) => <span className="price price--sm price--positive">{centsToPrice(s.readerEarnings)}</span>,
+    },
+    {
+      key: 'rating', header: 'Rating',
+      render: (s) => s.rating ? <StarRating value={s.rating} size="sm" /> : <span style={{ color: 'var(--text-muted)' }}>—</span>,
+    },
+    {
+      key: 'createdAt', header: 'Date', sortable: true,
+      render: (s) => new Date(s.createdAt).toLocaleDateString(),
+    },
+  ];
+
+  if (loading) return <LoadingPage message="Loading your reader dashboard..." />;
 
   return (
-    <>
-      {/* Online Toggle Banner */}
-      <div
-        className="card-static"
-        style={{
-          padding: '20px 28px',
-          marginBottom: '24px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '16px',
-          background: isOnline
-            ? 'linear-gradient(135deg, rgba(34, 197, 94, 0.08), var(--surface-card))'
-            : 'var(--surface-card)',
-          border: isOnline ? '1px solid rgba(34, 197, 94, 0.3)' : '1px solid var(--border-subtle)',
-        }}
-      >
+    <div className="flex flex-col gap-6">
+      {/* Online/Offline toggle banner */}
+      <Card variant={isOnline ? 'glow-pink' : 'static'} className="flex items-center justify-between">
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span
-              className={isOnline ? 'badge badge-online' : 'badge badge-offline'}
-              style={{ fontSize: '0.8rem' }}
-            >
-              {isOnline ? 'Online' : 'Offline'}
-            </span>
+          <div className="flex items-center gap-3">
+            <div
+              style={{
+                width: 14,
+                height: 14,
+                borderRadius: '50%',
+                background: isOnline ? 'var(--success)' : 'var(--text-muted)',
+                boxShadow: isOnline ? '0 0 12px rgba(34,197,94,0.5)' : 'none',
+              }}
+            />
+            <strong style={{ fontSize: '1.05rem' }}>
+              {isOnline ? 'You are Online' : 'You are Offline'}
+            </strong>
           </div>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-light-muted)', marginTop: '4px' }}>
-            {isOnline ? 'Clients can see you and request readings.' : 'Toggle online to accept readings.'}
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+            {isOnline
+              ? 'Clients can see you and request readings.'
+              : 'Go online to start receiving reading requests.'}
           </p>
         </div>
-        <button
-          onClick={handleToggleOnline}
-          className={`btn btn-sm ${isOnline ? 'btn-secondary' : 'btn-primary'}`}
-          disabled={togglingOnline}
+        <Button
+          variant={isOnline ? 'danger' : 'primary'}
+          onClick={toggleOnline}
+          loading={toggling}
         >
-          {togglingOnline ? 'Updating...' : isOnline ? 'Go Offline' : 'Go Online'}
-        </button>
+          {isOnline ? 'Go Offline' : 'Go Online'}
+        </Button>
+      </Card>
+
+      {/* Stats */}
+      <div className="grid grid--4">
+        <Stat label="Balance" value={centsToPrice(user?.accountBalance ?? 0)} icon="💰" />
+        <Stat label="Total Earned" value={centsToPrice(totalEarnings)} icon="📈" />
+        <Stat label="Sessions" value={completedSessions.length} icon="📖" />
+        <Stat label="Avg Rating" value={avgRating > 0 ? avgRating.toFixed(1) : '—'} icon="⭐" />
       </div>
 
-      {/* Balance */}
-      <div
-        className="card-static"
-        style={{
-          padding: '24px 28px',
-          marginBottom: '24px',
-          border: '1px solid var(--border-gold)',
-        }}
-      >
-        <p style={{ fontSize: '0.85rem', color: 'var(--text-light-muted)', marginBottom: '4px' }}>
-          Current Balance
-        </p>
-        <p style={{ fontSize: '2rem', fontWeight: 700, color: 'var(--accent-gold)', fontFamily: 'var(--font-body)' }}>
-          {formatCents(user?.accountBalance ?? 0)}
-        </p>
-      </div>
-
-      {/* Tabs */}
-      <div className="tabs" style={{ marginBottom: '24px' }}>
-        {(['overview', 'sessions', 'earnings', 'settings'] as const).map((tab) => (
-          <button
-            key={tab}
-            className={`tab ${activeTab === tab ? 'tab-active' : ''}`}
-            onClick={() => setActiveTab(tab)}
-            style={{ textTransform: 'capitalize' }}
-          >
-            {tab}
-          </button>
-        ))}
-      </div>
+      <Tabs tabs={tabList} activeTab={activeTab} onChange={setActiveTab} />
 
       {/* Overview */}
-      {activeTab === 'overview' && (
-        <div style={{ display: 'grid', gap: '16px', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
-          <StatCard label="Status" value={isOnline ? '🟢 Online' : '⚫ Offline'} />
-          <StatCard label="Chat Rate" value={pricingChat > 0 ? `${formatCents(pricingChat)}/min` : 'Not set'} />
-          <StatCard label="Voice Rate" value={pricingVoice > 0 ? `${formatCents(pricingVoice)}/min` : 'Not set'} />
-          <StatCard label="Video Rate" value={pricingVideo > 0 ? `${formatCents(pricingVideo)}/min` : 'Not set'} />
+      <TabPanel id="overview" activeTab={activeTab}>
+        <div className="flex flex-col gap-4">
+          <h3>Recent Sessions</h3>
+          {sessions.length === 0 ? (
+            <EmptyState
+              icon="🔮"
+              title="No Sessions Yet"
+              description="Go online to start receiving reading requests from clients."
+            />
+          ) : (
+            <Table
+              columns={sessionColumns}
+              data={sessions.slice(0, 5)}
+              keyExtractor={(s) => s.id}
+            />
+          )}
         </div>
-      )}
+      </TabPanel>
 
-      {/* Sessions */}
-      {activeTab === 'sessions' && (
-        isLoadingSessions ? (
-          <div className="loading-container"><div className="spinner" /></div>
-        ) : sessions.length === 0 ? (
-          <div className="empty-state">
-            <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.5rem' }}>No Sessions Yet</h3>
-            <p style={{ marginTop: '8px' }}>Go online to start receiving reading requests.</p>
-          </div>
+      {/* All sessions */}
+      <TabPanel id="sessions" activeTab={activeTab}>
+        <Table
+          columns={sessionColumns}
+          data={sessions}
+          keyExtractor={(s) => s.id}
+          emptyMessage="No sessions yet"
+        />
+      </TabPanel>
+
+      {/* Reviews */}
+      <TabPanel id="reviews" activeTab={activeTab}>
+        {reviewedSessions.length === 0 ? (
+          <EmptyState
+            icon="⭐"
+            title="No Reviews Yet"
+            description="Reviews will appear here after clients rate your readings."
+          />
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {sessions.map((session) => (
-              <div key={session.id} className="card-static" style={{ padding: '16px 20px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                  <div>
-                    <h4 style={{ fontSize: '0.95rem', margin: 0 }}>
-                      {session.client?.fullName || session.client?.username || 'Client'}
-                    </h4>
-                    <div style={{ display: 'flex', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
-                      <span className="badge badge-pink" style={{ fontSize: '0.6rem', textTransform: 'capitalize' }}>
-                        {session.type}
-                      </span>
-                      <span className="badge badge-gold" style={{ fontSize: '0.6rem', textTransform: 'capitalize' }}>
-                        {session.status.replace('_', ' ')}
-                      </span>
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <p className="price">{formatCents(session.totalPrice)}</p>
-                    <p style={{ fontSize: '0.75rem', color: 'var(--text-light-muted)' }}>
-                      {session.billedMinutes} min • {formatDate(session.createdAt)}
-                    </p>
-                  </div>
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-4" style={{ marginBottom: 'var(--space-4)' }}>
+              <StarRating value={avgRating} size="lg" showValue />
+              <span style={{ color: 'var(--text-muted)' }}>
+                {reviewedSessions.length} review{reviewedSessions.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+            {reviewedSessions.map((s) => (
+              <Card key={s.id} variant="static">
+                <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-2)' }}>
+                  <StarRating value={s.rating!} size="sm" />
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    {new Date(s.createdAt).toLocaleDateString()}
+                  </span>
                 </div>
-              </div>
+                {s.review && (
+                  <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                    "{s.review}"
+                  </p>
+                )}
+              </Card>
             ))}
           </div>
-        )
-      )}
-
-      {/* Earnings */}
-      {activeTab === 'earnings' && (
-        <>
-          <div className="card-static" style={{ padding: '20px', marginBottom: '16px', textAlign: 'center' }}>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-light-muted)', marginBottom: '4px' }}>
-              Total Earnings
-            </p>
-            <p style={{ fontSize: '1.5rem', fontWeight: 700, color: '#86EFAC' }}>
-              {formatCents(totalEarnings)}
-            </p>
-          </div>
-          {isLoadingTransactions ? (
-            <div className="loading-container"><div className="spinner" /></div>
-          ) : transactions.length === 0 ? (
-            <div className="empty-state">
-              <p>No earnings yet.</p>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {transactions.map((tx) => (
-                <div key={tx.id} className="card-static" style={{ padding: '14px 20px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                    <span style={{ fontSize: '0.88rem', textTransform: 'capitalize', fontWeight: 500 }}>
-                      {tx.type.replace('_', ' ')}
-                    </span>
-                    <div style={{ textAlign: 'right' }}>
-                      <span style={{ fontWeight: 700, color: tx.amount > 0 ? '#86EFAC' : '#FCA5A5' }}>
-                        {tx.amount > 0 ? '+' : ''}{formatCents(tx.amount)}
-                      </span>
-                      <p style={{ fontSize: '0.72rem', color: 'var(--text-light-muted)' }}>
-                        {formatDate(tx.createdAt)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
-      )}
+        )}
+      </TabPanel>
 
       {/* Settings */}
-      {activeTab === 'settings' && (
-        <div className="card-static" style={{ padding: '28px' }}>
-          <h3
-            style={{
-              fontFamily: 'var(--font-heading)',
-              color: 'var(--primary-pink)',
-              fontSize: '1.5rem',
-              marginBottom: '20px',
-            }}
-          >
-            Pricing Settings
-          </h3>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-light-muted)', marginBottom: '20px' }}>
-            Set your per-minute rates in cents (e.g., 500 = $5.00/min). Set to 0 to disable a reading type.
+      <TabPanel id="settings" activeTab={activeTab}>
+        <Card variant="static" style={{ maxWidth: '500px' }}>
+          <h3 style={{ marginBottom: 'var(--space-5)' }}>Per-Minute Pricing</h3>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 'var(--space-5)' }}>
+            Set your rate for each reading type. Set to $0 to disable a type.
           </p>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '400px' }}>
-            <div>
-              <label>💬 Chat Rate (cents/min)</label>
+          <div className="flex flex-col gap-4" style={{ marginBottom: 'var(--space-6)' }}>
+            <div className="form-group">
+              <label className="form-label">💬 Chat Rate ($/min)</label>
               <input
                 type="number"
-                min={0}
-                value={pricingChat}
-                onChange={(e) => setPricingChat(parseInt(e.target.value) || 0)}
+                className="form-input"
+                value={chatRate}
+                onChange={(e) => setChatRate(e.target.value)}
+                min="0"
+                step="0.01"
               />
             </div>
-            <div>
-              <label>🎤 Voice Rate (cents/min)</label>
+            <div className="form-group">
+              <label className="form-label">🎤 Voice Rate ($/min)</label>
               <input
                 type="number"
-                min={0}
-                value={pricingVoice}
-                onChange={(e) => setPricingVoice(parseInt(e.target.value) || 0)}
+                className="form-input"
+                value={voiceRate}
+                onChange={(e) => setVoiceRate(e.target.value)}
+                min="0"
+                step="0.01"
               />
             </div>
-            <div>
-              <label>📹 Video Rate (cents/min)</label>
+            <div className="form-group">
+              <label className="form-label">📹 Video Rate ($/min)</label>
               <input
                 type="number"
-                min={0}
-                value={pricingVideo}
-                onChange={(e) => setPricingVideo(parseInt(e.target.value) || 0)}
+                className="form-input"
+                value={videoRate}
+                onChange={(e) => setVideoRate(e.target.value)}
+                min="0"
+                step="0.01"
               />
             </div>
-            <button
-              onClick={handleSavePricing}
-              className="btn btn-primary"
-              disabled={savingPricing}
-              style={{ alignSelf: 'flex-start' }}
-            >
-              {savingPricing ? 'Saving...' : 'Save Pricing'}
-            </button>
           </div>
-        </div>
-      )}
-    </>
-  );
-}
 
-function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="card-static" style={{ padding: '20px', textAlign: 'center' }}>
-      <p style={{ fontSize: '0.8rem', color: 'var(--text-light-muted)', marginBottom: '6px' }}>{label}</p>
-      <p style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-light)' }}>{value}</p>
+          <Button variant="primary" onClick={savePricing} loading={savingPricing}>
+            Save Pricing
+          </Button>
+        </Card>
+      </TabPanel>
     </div>
   );
 }

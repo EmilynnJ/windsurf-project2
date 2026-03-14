@@ -1,125 +1,43 @@
-// ============================================================
-// LoginPage — Auth0 login/signup with celestial design
-// ============================================================
-
 import { useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { Button, LoadingPage, Card } from '../components/ui';
 
 export function LoginPage() {
-  const { isAuthenticated, isLoading, login, signup } = useAuth();
+  const { isAuthenticated, isLoading, login } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation();
-
-  // Redirect authenticated users away from login page
-  const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/dashboard';
 
   useEffect(() => {
-    if (!isLoading && isAuthenticated) {
-      navigate(from, { replace: true });
+    if (isAuthenticated) {
+      navigate('/dashboard', { replace: true });
     }
-  }, [isAuthenticated, isLoading, navigate, from]);
+  }, [isAuthenticated, navigate]);
 
-  if (isLoading) {
-    return (
-      <div className="loading-container page-content">
-        <div className="spinner" />
-        <p>Loading...</p>
-      </div>
-    );
-  }
+  if (isLoading) return <LoadingPage message="Checking authentication..." />;
 
   return (
-    <div className="page-content page-enter">
-      <div
-        className="container"
-        style={{
-          maxWidth: '440px',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          minHeight: 'calc(100vh - var(--nav-height) - 120px)',
-          textAlign: 'center',
-          padding: '40px 20px',
-        }}
-      >
-        {/* Decorative moon icon */}
-        <div
-          style={{
-            fontSize: '3rem',
-            marginBottom: '16px',
-            filter: 'drop-shadow(0 0 12px rgba(212, 175, 55, 0.4))',
-          }}
-        >
-          🌙
+    <div className="page-wrapper page-enter">
+      <div className="container" style={{ maxWidth: '440px' }}>
+        <div className="empty-state" style={{ minHeight: '60vh' }}>
+          <div style={{ fontSize: '3rem', marginBottom: 'var(--space-2)' }}>🔮</div>
+          <h1 style={{ fontSize: '2.5rem', marginBottom: 'var(--space-2)' }}>Welcome</h1>
+          <p style={{ color: 'var(--text-muted)', marginBottom: 'var(--space-6)', lineHeight: 1.7 }}>
+            Sign in to access your dashboard, connect with readers, and explore your spiritual journey.
+          </p>
+
+          <Card variant="glow-pink" style={{ width: '100%', textAlign: 'center' }}>
+            <Button variant="primary" size="lg" fullWidth onClick={() => login()}>
+              Sign In with Auth0
+            </Button>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 'var(--space-3)' }}>
+              New here? An account will be created automatically.
+            </p>
+          </Card>
+
+          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 'var(--space-6)' }}>
+            By signing in, you agree to our Terms of Service and Privacy Policy.
+          </p>
         </div>
-
-        <h1 style={{ marginBottom: '8px' }}>Welcome</h1>
-
-        <p
-          style={{
-            color: 'var(--text-light-secondary)',
-            marginBottom: '36px',
-            fontSize: '1rem',
-          }}
-        >
-          Sign in to access your readings, connect with gifted psychics,
-          and join our spiritual community.
-        </p>
-
-        <div
-          className="card-static"
-          style={{
-            width: '100%',
-            padding: '32px 28px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '16px',
-          }}
-        >
-          <button
-            onClick={login}
-            className="btn btn-primary btn-lg"
-            style={{ width: '100%' }}
-          >
-            Log In
-          </button>
-
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              color: 'var(--text-light-muted)',
-              fontSize: '0.85rem',
-            }}
-          >
-            <div style={{ flex: 1, height: '1px', background: 'var(--border-subtle)' }} />
-            <span>or</span>
-            <div style={{ flex: 1, height: '1px', background: 'var(--border-subtle)' }} />
-          </div>
-
-          <button
-            onClick={signup}
-            className="btn btn-secondary btn-lg"
-            style={{ width: '100%' }}
-          >
-            Create Account
-          </button>
-        </div>
-
-        <p
-          style={{
-            marginTop: '24px',
-            fontSize: '0.8rem',
-            color: 'var(--text-light-muted)',
-            lineHeight: 1.5,
-          }}
-        >
-          By continuing, you agree to SoulSeer's Terms of Service and
-          Privacy Policy.
-        </p>
       </div>
     </div>
   );

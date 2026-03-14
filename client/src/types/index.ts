@@ -1,253 +1,133 @@
-// ============================================================
-// SoulSeer Client Type Definitions
-// Must match server schema exactly
-// ============================================================
+/* ─── User & Auth ─────────────────────────────────────────────── */
 
-/** User roles in the system */
 export type UserRole = 'client' | 'reader' | 'admin';
-
-/** Types of readings available */
-export type ReadingType = 'chat' | 'voice' | 'video';
-
-/** Reading session lifecycle statuses */
-export type ReadingStatus = 'pending' | 'accepted' | 'in_progress' | 'completed' | 'cancelled';
-
-/** Financial transaction types */
-export type TransactionType = 'top_up' | 'reading_charge' | 'paid_message' | 'payout' | 'adjustment';
-
-/** Forum post categories */
-export type ForumCategory = 'General' | 'Readings' | 'Spiritual Growth' | 'Ask a Reader' | 'Announcements';
-
-/** Payment status */
-export type PaymentStatus = 'unpaid' | 'paid' | 'refunded' | 'failed' | 'pending';
-
-/** Notification types */
-export type NotificationType =
-  | 'reading_request'
-  | 'reading_accepted'
-  | 'reading_started'
-  | 'reading_completed'
-  | 'message_received'
-  | 'payment_received'
-  | 'balance_low'
-  | 'forum_reply'
-  | 'admin_announcement';
-
-// ============================================================
-// User / Reader Types
-// ============================================================
 
 export interface User {
   id: number;
-  auth0Id?: string;
+  auth0Id: string;
   email: string;
-  username: string | null;
-  fullName: string | null;
+  username?: string;
+  fullName?: string;
+  displayName?: string;
+  avatar?: string;
   role: UserRole;
-  bio: string | null;
-  specialties: string | null;
-  profileImage: string | null;
+  isActive: boolean;
+  isOnline: boolean;
+  accountBalance: number;
+  bio?: string;
+  specialties?: string;
   pricingChat: number;
   pricingVoice: number;
   pricingVideo: number;
-  accountBalance: number;
-  isOnline: boolean;
-  lastActiveAt: string | null;
+  stripeCustomerId?: string;
   createdAt: string;
-  updatedAt?: string;
 }
 
-/** Reader as returned from the public /api/readers endpoints */
+export interface AuthState {
+  user: User | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  login: () => void;
+  logout: () => void;
+  refreshUser?: () => void;
+}
+
+/* ─── Reader (Public view) ────────────────────────────────────── */
+
 export interface ReaderPublic {
   id: number;
-  username: string | null;
-  fullName: string | null;
-  role: 'reader';
-  bio: string | null;
-  specialties: string | null;
-  profileImage: string | null;
+  username?: string;
+  fullName?: string;
+  bio?: string;
+  avatar?: string;
+  profileImage?: string;
+  specialties?: string;
+  isOnline: boolean;
   pricingChat: number;
   pricingVoice: number;
   pricingVideo: number;
-  isOnline: boolean;
-  createdAt: string;
+  avgRating?: number;
+  reviewCount?: number;
 }
 
-/** Reader with aggregated rating info (for profile page) */
-export interface ReaderProfile extends ReaderPublic {
-  averageRating: number | null;
-  reviewCount: number;
-}
+/* ─── Readings ────────────────────────────────────────────────── */
 
-// ============================================================
-// Reading Types
-// ============================================================
-
-export interface ChatMessage {
-  senderId: number;
-  senderName: string;
-  message: string;
-  timestamp: string;
-}
+export type ReadingType = 'chat' | 'voice' | 'video';
+export type ReadingStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
 
 export interface Reading {
   id: number;
-  readerId: number;
   clientId: number;
+  readerId: number;
   type: ReadingType;
   status: ReadingStatus;
-  pricePerMinute: number;
-  channelName: string;
-  createdAt: string;
-  startedAt: string | null;
-  completedAt: string | null;
-  cancelledAt: string | null;
+  ratePerMinute: number;
   duration: number;
-  billedMinutes: number;
-  totalPrice: number;
-  paymentStatus: PaymentStatus;
-  chatTranscript: ChatMessage[] | null;
+  totalCost: number;
+  readerEarnings: number;
+  agoraChannel?: string;
+  startedAt?: string;
+  endedAt?: string;
+  createdAt: string;
 }
 
-/** Reading with joined reader/client info */
-export interface ReadingWithUsers extends Reading {
-  reader?: ReaderPublic;
-  client?: Pick<User, 'id' | 'username' | 'fullName' | 'profileImage'>;
-}
+/* ─── Transactions ────────────────────────────────────────────── */
 
-// ============================================================
-// Transaction Types
-// ============================================================
+export type TransactionType = 'top_up' | 'reading_charge' | 'reader_payout' | 'refund' | 'admin_adjustment';
 
 export interface Transaction {
   id: number;
   userId: number;
   type: TransactionType;
   amount: number;
-  balanceBefore: number;
-  balanceAfter: number;
-  readingId: number | null;
-  messageId: number | null;
-  note: string | null;
+  readingId?: number;
+  stripePaymentIntentId?: string;
+  description?: string;
   createdAt: string;
 }
 
-// ============================================================
-// Rating / Review Types
-// ============================================================
+/* ─── Forum ───────────────────────────────────────────────────── */
 
-export interface ReadingRating {
-  id: number;
-  readingId: number;
-  clientId: number;
-  readerId: number;
-  rating: number;
-  review: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface ReviewWithAuthor extends ReadingRating {
-  author: {
-    id: number;
-    username: string | null;
-    fullName: string | null;
-    profileImage: string | null;
-  };
-}
-
-// ============================================================
-// Forum Types
-// ============================================================
+export type ForumCategory = 'general' | 'readings' | 'spiritual_growth' | 'introductions' | 'off_topic';
 
 export interface ForumPost {
   id: number;
   userId: number;
+  userName?: string;
+  userAvatar?: string;
+  category: ForumCategory;
   title: string;
   content: string;
-  category: ForumCategory;
-  flagCount: number;
-  viewCount: number;
-  isPinned: boolean;
-  isLocked: boolean;
+  commentCount: number;
   createdAt: string;
   updatedAt: string;
-  author?: {
-    id: number;
-    username: string | null;
-    fullName: string | null;
-    profileImage: string | null;
-    role: UserRole;
-  };
-  commentCount?: number;
 }
 
 export interface ForumComment {
   id: number;
   postId: number;
   userId: number;
-  parentCommentId: number | null;
+  userName?: string;
+  userAvatar?: string;
   content: string;
-  flagCount: number;
   createdAt: string;
-  updatedAt: string;
-  author?: {
-    id: number;
-    username: string | null;
-    fullName: string | null;
-    profileImage: string | null;
-    role: UserRole;
-  };
-  replies?: ForumComment[];
 }
 
-// ============================================================
-// API Response Wrappers
-// ============================================================
+/* ─── Reviews ─────────────────────────────────────────────────── */
 
-export interface PaginatedResponse<T> {
-  data: T[];
-  count: number;
-  limit: number;
-  offset: number;
-  total?: number;
+export interface Review {
+  id: number;
+  readingId: number;
+  clientId: number;
+  readerId: number;
+  rating: number;
+  review?: string;
+  createdAt: string;
 }
 
-export interface ReadersResponse {
-  readers: ReaderPublic[];
-  count: number;
-  limit: number;
-  offset: number;
-}
+/* ─── API ─────────────────────────────────────────────────────── */
 
 export interface ApiError {
-  error: string;
-  details?: unknown;
-}
-
-// ============================================================
-// Auth Types
-// ============================================================
-
-export interface AuthUser {
-  id: number;
-  email: string;
-  role: UserRole;
-  username: string | null;
-  fullName: string | null;
-  profileImage: string | null;
-  accountBalance: number;
-  isOnline: boolean;
-}
-
-// ============================================================
-// Toast Notification Types
-// ============================================================
-
-export type ToastType = 'success' | 'error' | 'info' | 'warning';
-
-export interface Toast {
-  id: string;
-  type: ToastType;
   message: string;
+  statusCode: number;
 }

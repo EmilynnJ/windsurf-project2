@@ -1,125 +1,176 @@
-// ============================================================
-// AdminDashboard — User management, readings, transactions, forum moderation
-// ============================================================
-
 import { useState, useEffect, useCallback } from 'react';
 import { useToast } from '../../components/ToastProvider';
-import { adminApi, forumApi } from '../../services/api';
-import type { User, ReadingWithUsers, Transaction, ForumPost, UserRole } from '../../types';
+import { apiService } from '../../services/api';
+import {
+  Button, Card, Stat, Tabs, TabPanel, Table, Badge,
+  Modal, ConfirmDialog, SearchInput, LoadingPage, EmptyState,
+  Input, Select, Textarea,
+} from '../../components/ui';
+import type { Column } from '../../components/ui/Table';
 
-function formatCents(cents: number): string {
-  return `$${(cents / 100).toFixed(2)}`;
+function centsToPrice(c: number): string {
+  return `$${(c / 100).toFixed(2)}`;
 }
 
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
+/* ─── Types ───────────────────────────────────────────────────── */
+
+interface AdminUser {
+  id: number;
+  email: string;
+  displayName: string | null;
+  role: 'client' | 'reader' | 'admin';
+  isActive: boolean;
+  balance: number;
+  createdAt: string;
+  [key: string]: unknown;
 }
 
-type AdminTab = 'users' | 'readings' | 'transactions' | 'forum' | 'balance';
+interface AdminReading {
+  id: number;
+  clientId: number;
+  readerId: number;
+  type: string;
+  status: string;
+  duration: number;
+  totalCost: number;
+  createdAt: string;
+  [key: string]: unknown;
+}
+
+interface AdminTransaction {
+  id: number;
+  userId: number;
+  type: string;
+  amount: number;
+  description: string | null;
+  createdAt: string;
+  [key: string]: unknown;
+}
+
+interface FlaggedPost {
+  id: number;
+  postId: number;
+  reporterId: number;
+  reason: string;
+  resolved: boolean;
+  createdAt: string;
+  [key: string]: unknown;
+}
+
+/* ─── Component ───────────────────────────────────────────────── */
+
+const tabList = [
+  { id: 'overview', label: '📊 Overview' },
+  { id: 'users', label: '👥 Users' },
+  { id: 'readings', label: '📖 Readings' },
+  { id: 'transactions', label: '💰 Transactions' },
+  { id: 'moderation', label: '🛡️ Moderation' },
+];
 
 export function AdminDashboard() {
   const { addToast } = useToast();
-  const [activeTab, setActiveTab] = useState<AdminTab>('users');
+  const [activeTab, setActiveTab] = useState('overview');
+  const [loading, setLoading] = useState(true);
 
-  // Users
-  const [users, setUsers] = useState<User[]>([]);
-  const [usersLoading, setUsersLoading] = useState(false);
-  const [roleFilter, setRoleFilter] = useState('');
+  // Data
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [readings, setReadings] = useState<AdminReading[]>([]);
+  const [transactions, setTransactions] = useState<AdminTransaction[]>([]);
+  const [flags, setFlags] = useState<FlaggedPost[]>([]);
 
-  // Readings
-  const [readings, setReadings] = useState<ReadingWithUsers[]>([]);
-  const [readingsLoading, setReadingsLoading] = useState(false);
+  // Filters
+  const [userSearch, setUserSearch] = useState('');
+  const [userRoleFilter, setUserRoleFilter] = useState('');
 
-  // Transactions
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [txLoading, setTxLoading] = useState(false);
+  // Modals
+  const [createReaderOpen, setCreateReaderOpen] = useState(false);
+  const [adjustBalanceUser, setAdjustBalanceUser] = useState<AdminUser | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{
+    title: string; message: string; onConfirm: () => void;
+  } | null>(null);
 
-  // Forum
-  const [posts, setPosts] = useState<ForumPost[]>([]);
-  const [postsLoading, setPostsLoading] = useState(false);
+  // Create reader form
+  const [newReader, setNewReader] = useState({ email: '', displayName: '', password: '' });
+  const [creatingReader, setCreatingReader] = useState(false);
 
-  // Balance adjustment
-  const [adjustUserId, setAdjustUserId] = useState('');
+  // Balance adjust form
   const [adjustAmount, setAdjustAmount] = useState('');
-  const [adjustNote, setAdjustNote] = useState('');
+  const [adjustReason, setAdjustReason] = useState('');
   const [adjusting, setAdjusting] = useState(false);
 
-  useEffect(() => {
-    loadTabData();
-  }, [activeTab, roleFilter]);
-
-  const loadTabData = useCallback(async () => {
+  const fetchAll = useCallback(async () => {
     try {
-      switch (activeTab) {
-        case 'users': {
-          setUsersLoading(true);
-          const result = await adminApi.getUsers({ role: roleFilter || undefined, limit: 50 });
-          setUsers(result.users);
-          setUsersLoading(false);
-          break;
-        }
-        case 'readings': {
-          setReadingsLoading(true);
-          const result = await adminApi.getReadings({ limit: 30 });
-          setReadings(result.readings);
-          setReadingsLoading(false);
-          break;
-        }
-        case 'transactions': {
-          setTxLoading(true);
-          const result = await adminApi.getTransactions({ limit: 50 });
-          setTransactions(result.transactions);
-          setTxLoading(false);
-          break;
-        }
-        case 'forum': {
-          setPostsLoading(true);
-          const result = await forumApi.getPosts({ limit: 30 });
-          setPosts(result.posts);
-          setPostsLoading(false);
-          break;
-        }
-      }
+      const [u, r, t, f] = await Promise.all([
+        apiService.get('/api/admin/users').catch(() => []) as Promise<AdminUser[]>,
+        apiService.get('/api/admin/readings').catch(() => []) as Promise<AdminReading[]>,
+        apiService.get('/api/admin/transactions').catch(() => []) as Promise<AdminTransaction[]>,
+        apiService.get('/api/admin/flags').catch(() => []) as Promise<FlaggedPost[]>,
+      ]);
+      setUsers(u);
+      setReadings(r);
+      setTransactions(t);
+      setFlags(f);
     } catch {
-      addToast('error', 'Failed to load data');
-      setUsersLoading(false);
-      setReadingsLoading(false);
-      setTxLoading(false);
-      setPostsLoading(false);
+      // handle
+    } finally {
+      setLoading(false);
     }
-  }, [activeTab, roleFilter, addToast]);
+  }, []);
 
-  const handleRoleChange = async (userId: number, newRole: UserRole) => {
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  /* ─── Handlers ──────────────────────────────────────────── */
+
+  const handleCreateReader = async () => {
+    if (!newReader.email || !newReader.displayName) {
+      addToast('error', 'Email and display name are required');
+      return;
+    }
+    setCreatingReader(true);
     try {
-      await adminApi.updateUserRole(userId, newRole);
-      addToast('success', 'User role updated');
-      loadTabData();
-    } catch {
-      addToast('error', 'Failed to update role');
+      await apiService.post('/api/admin/users/create-reader', newReader);
+      addToast('success', `Reader "${newReader.displayName}" created!`);
+      setCreateReaderOpen(false);
+      setNewReader({ email: '', displayName: '', password: '' });
+      fetchAll();
+    } catch (err: unknown) {
+      addToast('error', err instanceof Error ? err.message : 'Failed to create reader');
+    } finally {
+      setCreatingReader(false);
     }
   };
 
-  const handleBalanceAdjust = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const userId = parseInt(adjustUserId);
-    const amount = parseInt(adjustAmount);
-    if (isNaN(userId) || isNaN(amount) || !adjustNote.trim()) {
-      addToast('warning', 'Please fill all fields correctly');
-      return;
-    }
+  const handleToggleActive = async (user: AdminUser) => {
+    setConfirmAction({
+      title: user.isActive ? 'Deactivate User' : 'Activate User',
+      message: `Are you sure you want to ${user.isActive ? 'deactivate' : 'activate'} ${user.email}?`,
+      onConfirm: async () => {
+        try {
+          await apiService.patch(`/api/admin/users/${user.id}/status`, { isActive: !user.isActive });
+          addToast('success', `User ${user.isActive ? 'deactivated' : 'activated'}`);
+          fetchAll();
+        } catch {
+          addToast('error', 'Failed to update user status');
+        }
+        setConfirmAction(null);
+      },
+    });
+  };
+
+  const handleAdjustBalance = async () => {
+    if (!adjustBalanceUser || !adjustAmount) return;
     setAdjusting(true);
     try {
-      await adminApi.adjustBalance(userId, amount, adjustNote);
-      addToast('success', 'Balance adjusted');
-      setAdjustUserId('');
+      const amount = Math.round(parseFloat(adjustAmount) * 100);
+      await apiService.post(`/api/admin/users/${adjustBalanceUser.id}/adjust-balance`, {
+        amount,
+        reason: adjustReason || 'Admin adjustment',
+      });
+      addToast('success', `Balance adjusted by ${centsToPrice(amount)} for ${adjustBalanceUser.email}`);
+      setAdjustBalanceUser(null);
       setAdjustAmount('');
-      setAdjustNote('');
+      setAdjustReason('');
+      fetchAll();
     } catch {
       addToast('error', 'Failed to adjust balance');
     } finally {
@@ -127,271 +178,331 @@ export function AdminDashboard() {
     }
   };
 
-  const handleDeletePost = async (postId: number) => {
-    if (!confirm('Are you sure you want to delete this post?')) return;
+  const handleResolveFlag = async (flagId: number) => {
     try {
-      await forumApi.deletePost(postId);
-      addToast('success', 'Post deleted');
-      setPosts((prev) => prev.filter((p) => p.id !== postId));
+      await apiService.patch(`/api/admin/flags/${flagId}/resolve`, {});
+      addToast('success', 'Flag resolved');
+      fetchAll();
     } catch {
-      addToast('error', 'Failed to delete post');
+      addToast('error', 'Failed to resolve flag');
     }
   };
 
-  const handlePayout = async (readerId: number) => {
-    try {
-      await adminApi.triggerPayout(readerId);
-      addToast('success', 'Payout triggered');
-    } catch {
-      addToast('error', 'Failed to trigger payout');
-    }
-  };
+  /* ─── Filtered users ────────────────────────────────────── */
 
-  const TABS: { key: AdminTab; label: string }[] = [
-    { key: 'users', label: 'Users' },
-    { key: 'readings', label: 'Readings' },
-    { key: 'transactions', label: 'Transactions' },
-    { key: 'balance', label: 'Balance Adjust' },
-    { key: 'forum', label: 'Forum' },
+  const filteredUsers = users.filter((u) => {
+    if (userSearch) {
+      const q = userSearch.toLowerCase();
+      if (
+        !(u.email ?? '').toLowerCase().includes(q) &&
+        !(u.displayName ?? '').toLowerCase().includes(q)
+      ) return false;
+    }
+    if (userRoleFilter && u.role !== userRoleFilter) return false;
+    return true;
+  });
+
+  /* ─── Columns ───────────────────────────────────────────── */
+
+  const userColumns: Column<AdminUser>[] = [
+    { key: 'id', header: 'ID', width: '50px', sortable: true },
+    { key: 'email', header: 'Email', sortable: true },
+    {
+      key: 'displayName', header: 'Name',
+      render: (u) => <strong>{u.displayName || '—'}</strong>,
+    },
+    {
+      key: 'role', header: 'Role',
+      render: (u) => (
+        <Badge variant={u.role === 'admin' ? 'gold' : u.role === 'reader' ? 'pink' : 'info'}>
+          {u.role}
+        </Badge>
+      ),
+    },
+    {
+      key: 'isActive', header: 'Status',
+      render: (u) => <Badge variant={u.isActive ? 'online' : 'danger'}>{u.isActive ? 'Active' : 'Inactive'}</Badge>,
+    },
+    {
+      key: 'balance', header: 'Balance', sortable: true,
+      render: (u) => <span className="price price--sm">{centsToPrice(u.balance)}</span>,
+    },
+    {
+      key: 'actions', header: 'Actions', width: '180px',
+      render: (u) => (
+        <div className="flex gap-2">
+          <Button size="sm" variant="secondary" onClick={() => setAdjustBalanceUser(u)}>
+            Adjust $
+          </Button>
+          <Button size="sm" variant={u.isActive ? 'danger' : 'primary'} onClick={() => handleToggleActive(u)}>
+            {u.isActive ? 'Deactivate' : 'Activate'}
+          </Button>
+        </div>
+      ),
+    },
   ];
 
+  const readingColumns: Column<AdminReading>[] = [
+    { key: 'id', header: 'ID', width: '50px', sortable: true },
+    { key: 'clientId', header: 'Client', render: (r) => `#${r.clientId}` },
+    { key: 'readerId', header: 'Reader', render: (r) => `#${r.readerId}` },
+    { key: 'type', header: 'Type', render: (r) => <Badge variant="pink">{r.type}</Badge> },
+    {
+      key: 'status', header: 'Status',
+      render: (r) => (
+        <Badge variant={r.status === 'completed' ? 'online' : r.status === 'in_progress' ? 'info' : 'gold'}>
+          {r.status}
+        </Badge>
+      ),
+    },
+    { key: 'duration', header: 'Duration', render: (r) => r.duration > 0 ? `${r.duration} min` : '—' },
+    { key: 'totalCost', header: 'Revenue', sortable: true, render: (r) => <span className="price price--sm">{centsToPrice(r.totalCost)}</span> },
+    { key: 'createdAt', header: 'Date', sortable: true, render: (r) => new Date(r.createdAt).toLocaleDateString() },
+  ];
+
+  const txColumns: Column<AdminTransaction>[] = [
+    { key: 'id', header: 'ID', width: '50px', sortable: true },
+    { key: 'userId', header: 'User', render: (t) => `#${t.userId}` },
+    {
+      key: 'type', header: 'Type',
+      render: (t) => <Badge variant={t.type === 'top_up' ? 'online' : t.type === 'reading_charge' ? 'pink' : 'gold'}>{t.type.replace(/_/g, ' ')}</Badge>,
+    },
+    {
+      key: 'amount', header: 'Amount', sortable: true,
+      render: (t) => <span className={`price price--sm ${t.amount >= 0 ? 'price--positive' : 'price--negative'}`}>{t.amount >= 0 ? '+' : ''}{centsToPrice(Math.abs(t.amount))}</span>,
+    },
+    { key: 'description', header: 'Description', render: (t) => t.description || '—' },
+    { key: 'createdAt', header: 'Date', sortable: true, render: (t) => new Date(t.createdAt).toLocaleDateString() },
+  ];
+
+  if (loading) return <LoadingPage message="Loading admin dashboard..." />;
+
+  const totalRevenue = readings.reduce((s, r) => s + (r.totalCost || 0), 0);
+  const onlineReaders = users.filter((u) => u.role === 'reader' && u.isActive).length;
+  const unresolvedFlags = flags.filter((f) => !f.resolved).length;
+
   return (
-    <>
-      <div className="tabs" style={{ marginBottom: '24px' }}>
-        {TABS.map((tab) => (
-          <button
-            key={tab.key}
-            className={`tab ${activeTab === tab.key ? 'tab-active' : ''}`}
-            onClick={() => setActiveTab(tab.key)}
-          >
-            {tab.label}
-          </button>
-        ))}
+    <div className="flex flex-col gap-6">
+      {/* Stats */}
+      <div className="grid grid--4">
+        <Stat label="Total Users" value={users.length} icon="👥" />
+        <Stat label="Active Readers" value={onlineReaders} icon="🔮" />
+        <Stat label="Total Revenue" value={centsToPrice(totalRevenue)} icon="💰" />
+        <Stat
+          label="Flagged"
+          value={unresolvedFlags}
+          icon="🛡️"
+        />
       </div>
 
-      {/* ========== USERS TAB ========== */}
-      {activeTab === 'users' && (
-        <>
-          <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
-            {['', 'client', 'reader', 'admin'].map((role) => (
-              <button
-                key={role}
-                className={`btn btn-sm ${roleFilter === role ? 'btn-primary' : 'btn-ghost'}`}
-                onClick={() => setRoleFilter(role)}
-              >
-                {role || 'All'}
-              </button>
-            ))}
-          </div>
-          {usersLoading ? (
-            <div className="loading-container"><div className="spinner" /></div>
-          ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--font-body)', fontSize: '0.85rem' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                    {['ID', 'Name', 'Email', 'Role', 'Balance', 'Online', 'Actions'].map((h) => (
-                      <th key={h} style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--text-light-muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map((u) => (
-                    <tr key={u.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                      <td style={{ padding: '10px 12px' }}>{u.id}</td>
-                      <td style={{ padding: '10px 12px' }}>{u.fullName || u.username || '—'}</td>
-                      <td style={{ padding: '10px 12px', color: 'var(--text-light-muted)' }}>{u.email}</td>
-                      <td style={{ padding: '10px 12px' }}>
-                        <select
-                          value={u.role}
-                          onChange={(e) => handleRoleChange(u.id, e.target.value as UserRole)}
-                          style={{ padding: '4px 8px', fontSize: '0.8rem', minWidth: '80px' }}
-                        >
-                          <option value="client">Client</option>
-                          <option value="reader">Reader</option>
-                          <option value="admin">Admin</option>
-                        </select>
-                      </td>
-                      <td style={{ padding: '10px 12px' }} className="price">{formatCents(u.accountBalance)}</td>
-                      <td style={{ padding: '10px 12px' }}>
-                        <span className={u.isOnline ? 'badge badge-online' : 'badge badge-offline'} style={{ fontSize: '0.6rem' }}>
-                          {u.isOnline ? 'Yes' : 'No'}
-                        </span>
-                      </td>
-                      <td style={{ padding: '10px 12px' }}>
-                        {u.role === 'reader' && (
-                          <button
-                            onClick={() => handlePayout(u.id)}
-                            className="btn btn-sm btn-gold"
-                            style={{ padding: '4px 10px', fontSize: '0.75rem' }}
-                          >
-                            Payout
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </>
-      )}
+      <Tabs tabs={tabList} activeTab={activeTab} onChange={setActiveTab} />
 
-      {/* ========== READINGS TAB ========== */}
-      {activeTab === 'readings' && (
-        readingsLoading ? (
-          <div className="loading-container"><div className="spinner" /></div>
-        ) : readings.length === 0 ? (
-          <div className="empty-state"><p>No readings found.</p></div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {readings.map((r) => (
-              <div key={r.id} className="card-static" style={{ padding: '16px 20px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-                  <div>
-                    <p style={{ fontSize: '0.9rem', fontWeight: 600 }}>
-                      Reading #{r.id} — {r.type}
-                    </p>
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-light-muted)' }}>
-                      Reader: {r.reader?.fullName || r.readerId} → Client: {r.client?.fullName || r.clientId}
-                    </p>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <span className="badge badge-gold" style={{ fontSize: '0.6rem', textTransform: 'capitalize' }}>
-                      {r.status.replace('_', ' ')}
-                    </span>
-                    <p className="price" style={{ marginTop: '4px' }}>{formatCents(r.totalPrice)}</p>
-                    <p style={{ fontSize: '0.72rem', color: 'var(--text-light-muted)' }}>{formatDate(r.createdAt)}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )
-      )}
-
-      {/* ========== TRANSACTIONS TAB ========== */}
-      {activeTab === 'transactions' && (
-        txLoading ? (
-          <div className="loading-container"><div className="spinner" /></div>
-        ) : transactions.length === 0 ? (
-          <div className="empty-state"><p>No transactions found.</p></div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--font-body)', fontSize: '0.85rem' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                  {['ID', 'User', 'Type', 'Amount', 'Balance After', 'Date'].map((h) => (
-                    <th key={h} style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--text-light-muted)', fontWeight: 600 }}>
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {transactions.map((tx) => (
-                  <tr key={tx.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                    <td style={{ padding: '10px 12px' }}>{tx.id}</td>
-                    <td style={{ padding: '10px 12px' }}>{tx.userId}</td>
-                    <td style={{ padding: '10px 12px', textTransform: 'capitalize' }}>{tx.type.replace('_', ' ')}</td>
-                    <td style={{ padding: '10px 12px', color: tx.amount > 0 ? '#86EFAC' : '#FCA5A5', fontWeight: 600 }}>
-                      {tx.amount > 0 ? '+' : ''}{formatCents(tx.amount)}
-                    </td>
-                    <td style={{ padding: '10px 12px' }}>{formatCents(tx.balanceAfter)}</td>
-                    <td style={{ padding: '10px 12px', color: 'var(--text-light-muted)' }}>{formatDate(tx.createdAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )
-      )}
-
-      {/* ========== BALANCE ADJUST TAB ========== */}
-      {activeTab === 'balance' && (
-        <div className="card-static" style={{ padding: '28px', maxWidth: '500px' }}>
-          <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--primary-pink)', fontSize: '1.5rem', marginBottom: '20px' }}>
-            Adjust User Balance
-          </h3>
-          <form onSubmit={handleBalanceAdjust} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            <div>
-              <label>User ID</label>
-              <input
-                type="number"
-                placeholder="Enter user ID"
-                value={adjustUserId}
-                onChange={(e) => setAdjustUserId(e.target.value)}
-                required
-              />
-            </div>
-            <div>
-              <label>Amount (cents, negative to deduct)</label>
-              <input
-                type="number"
-                placeholder="e.g. 1000 for $10, -500 for -$5"
-                value={adjustAmount}
-                onChange={(e) => setAdjustAmount(e.target.value)}
-                required
-              />
-            </div>
-            <div>
-              <label>Note / Reason</label>
-              <input
-                type="text"
-                placeholder="Reason for adjustment"
-                value={adjustNote}
-                onChange={(e) => setAdjustNote(e.target.value)}
-                required
-              />
-            </div>
-            <button type="submit" className="btn btn-gold" disabled={adjusting} style={{ alignSelf: 'flex-start' }}>
-              {adjusting ? 'Processing...' : 'Apply Adjustment'}
-            </button>
-          </form>
-        </div>
-      )}
-
-      {/* ========== FORUM MODERATION TAB ========== */}
-      {activeTab === 'forum' && (
-        postsLoading ? (
-          <div className="loading-container"><div className="spinner" /></div>
-        ) : posts.length === 0 ? (
-          <div className="empty-state"><p>No forum posts.</p></div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {posts.map((post) => (
-              <div key={post.id} className="card-static" style={{ padding: '16px 20px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', gap: '6px', marginBottom: '4px', flexWrap: 'wrap' }}>
-                      <span className="badge badge-gold" style={{ fontSize: '0.6rem' }}>{post.category}</span>
-                      {post.flagCount > 0 && (
-                        <span className="badge" style={{ fontSize: '0.6rem', background: 'rgba(239,68,68,0.15)', color: '#FCA5A5', border: '1px solid rgba(239,68,68,0.3)' }}>
-                          🚩 {post.flagCount} flags
-                        </span>
-                      )}
+      {/* Overview */}
+      <TabPanel id="overview" activeTab={activeTab}>
+        <div className="grid grid--2" style={{ gap: 'var(--space-6)' }}>
+          <Card variant="static">
+            <h4 style={{ marginBottom: 'var(--space-3)' }}>Recent Readings</h4>
+            <Table
+              columns={readingColumns.slice(0, 5)}
+              data={readings.slice(0, 5)}
+              keyExtractor={(r) => r.id}
+              emptyMessage="No readings yet"
+            />
+          </Card>
+          <Card variant="static">
+            <h4 style={{ marginBottom: 'var(--space-3)' }}>Flagged Content ({unresolvedFlags})</h4>
+            {unresolvedFlags === 0 ? (
+              <EmptyState icon="✅" title="No Flagged Content" description="All clear!" />
+            ) : (
+              <div className="flex flex-col gap-2">
+                {flags.filter((f) => !f.resolved).slice(0, 5).map((f) => (
+                  <div key={f.id} className="flex items-center justify-between" style={{ padding: 'var(--space-3)', background: 'var(--surface-card)', borderRadius: 'var(--radius-sm)' }}>
+                    <div>
+                      <p style={{ fontSize: '0.85rem' }}>Post #{f.postId}</p>
+                      <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{f.reason}</p>
                     </div>
-                    <h4 style={{ fontSize: '0.95rem', margin: 0 }}>{post.title}</h4>
-                    <p style={{ fontSize: '0.78rem', color: 'var(--text-light-muted)', marginTop: '4px' }}>
-                      by {post.author?.fullName || post.author?.username || 'Unknown'} • {formatDate(post.createdAt)}
+                    <Button size="sm" variant="primary" onClick={() => handleResolveFlag(f.id)}>
+                      Resolve
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
+      </TabPanel>
+
+      {/* Users */}
+      <TabPanel id="users" activeTab={activeTab}>
+        <div className="flex gap-4 items-center flex-wrap" style={{ marginBottom: 'var(--space-4)' }}>
+          <div style={{ flex: 1, minWidth: '200px' }}>
+            <SearchInput value={userSearch} onChange={setUserSearch} placeholder="Search users..." />
+          </div>
+          <Select
+            options={[
+              { value: '', label: 'All Roles' },
+              { value: 'client', label: 'Clients' },
+              { value: 'reader', label: 'Readers' },
+              { value: 'admin', label: 'Admins' },
+            ]}
+            value={userRoleFilter}
+            onChange={(e) => setUserRoleFilter(e.target.value)}
+          />
+          <Button variant="primary" onClick={() => setCreateReaderOpen(true)}>
+            + Create Reader
+          </Button>
+        </div>
+        <Table
+          columns={userColumns}
+          data={filteredUsers}
+          keyExtractor={(u) => u.id}
+          emptyMessage="No users found"
+        />
+      </TabPanel>
+
+      {/* Readings */}
+      <TabPanel id="readings" activeTab={activeTab}>
+        <Table
+          columns={readingColumns}
+          data={readings}
+          keyExtractor={(r) => r.id}
+          emptyMessage="No readings yet"
+        />
+      </TabPanel>
+
+      {/* Transactions */}
+      <TabPanel id="transactions" activeTab={activeTab}>
+        <Table
+          columns={txColumns}
+          data={transactions}
+          keyExtractor={(t) => t.id}
+          emptyMessage="No transactions yet"
+        />
+      </TabPanel>
+
+      {/* Moderation */}
+      <TabPanel id="moderation" activeTab={activeTab}>
+        {flags.length === 0 ? (
+          <EmptyState icon="✅" title="No Flagged Content" description="Community is behaving well." />
+        ) : (
+          <div className="flex flex-col gap-3">
+            {flags.map((f) => (
+              <Card key={f.id} variant={f.resolved ? 'static' : 'glow-pink'}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={f.resolved ? 'online' : 'danger'}>
+                        {f.resolved ? 'Resolved' : 'Pending'}
+                      </Badge>
+                      <span>Post #{f.postId}</span>
+                    </div>
+                    <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: 'var(--space-1)' }}>
+                      Reported by #{f.reporterId}: {f.reason}
+                    </p>
+                    <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                      {new Date(f.createdAt).toLocaleString()}
                     </p>
                   </div>
-                  <button
-                    onClick={() => handleDeletePost(post.id)}
-                    className="btn btn-sm"
-                    style={{ background: 'rgba(239,68,68,0.15)', color: '#FCA5A5', border: '1px solid rgba(239,68,68,0.3)', fontSize: '0.78rem', padding: '6px 12px' }}
-                  >
-                    Delete
-                  </button>
+                  {!f.resolved && (
+                    <Button size="sm" variant="primary" onClick={() => handleResolveFlag(f.id)}>
+                      Resolve
+                    </Button>
+                  )}
                 </div>
-              </div>
+              </Card>
             ))}
           </div>
-        )
-      )}
-    </>
+        )}
+      </TabPanel>
+
+      {/* ─── Create Reader Modal ──────────────────────────── */}
+      <Modal
+        open={createReaderOpen}
+        onClose={() => setCreateReaderOpen(false)}
+        title="Create Reader Account"
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setCreateReaderOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={handleCreateReader} loading={creatingReader}>
+              Create Reader
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <Input
+            label="Email"
+            type="email"
+            value={newReader.email}
+            onChange={(e) => setNewReader((p) => ({ ...p, email: e.target.value }))}
+            required
+          />
+          <Input
+            label="Display Name"
+            value={newReader.displayName}
+            onChange={(e) => setNewReader((p) => ({ ...p, displayName: e.target.value }))}
+            required
+          />
+          <Input
+            label="Password"
+            type="password"
+            value={newReader.password}
+            onChange={(e) => setNewReader((p) => ({ ...p, password: e.target.value }))}
+            help="Leave blank for Auth0 invite"
+          />
+        </div>
+      </Modal>
+
+      {/* ─── Adjust Balance Modal ─────────────────────────── */}
+      <Modal
+        open={!!adjustBalanceUser}
+        onClose={() => setAdjustBalanceUser(null)}
+        title={`Adjust Balance — ${adjustBalanceUser?.email}`}
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setAdjustBalanceUser(null)}>
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={handleAdjustBalance} loading={adjusting}>
+              Adjust Balance
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+            Current: <strong className="price">{centsToPrice(adjustBalanceUser?.balance ?? 0)}</strong>
+          </p>
+          <Input
+            label="Amount ($)"
+            type="number"
+            value={adjustAmount}
+            onChange={(e) => setAdjustAmount(e.target.value)}
+            help="Positive to add, negative to deduct"
+            step="0.01"
+          />
+          <Textarea
+            label="Reason"
+            value={adjustReason}
+            onChange={(e) => setAdjustReason(e.target.value)}
+            placeholder="Reason for adjustment..."
+          />
+        </div>
+      </Modal>
+
+      {/* ─── Confirm Dialog ───────────────────────────────── */}
+      <ConfirmDialog
+        open={!!confirmAction}
+        onClose={() => setConfirmAction(null)}
+        onConfirm={() => confirmAction?.onConfirm()}
+        title={confirmAction?.title ?? ''}
+        message={confirmAction?.message ?? ''}
+        variant="danger"
+      />
+    </div>
   );
 }
