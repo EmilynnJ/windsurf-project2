@@ -3,7 +3,6 @@ import {
   boolean,
   index,
   integer,
-  jsonb,
   pgEnum,
   pgTable,
   serial,
@@ -29,34 +28,19 @@ export const readingTypeEnum = pgEnum("reading_type", [
 
 export const readingStatusEnum = pgEnum("reading_status", [
   "pending",
-  "accepted",
-  "in_progress",
+  "active",
+  "paused",
   "completed",
   "cancelled",
-  "disputed",
-]);
-
-export const paymentStatusEnum = pgEnum("payment_status", [
-  "pending",
-  "paid",
-  "refunded",
+  "missed",
 ]);
 
 export const transactionTypeEnum = pgEnum("transaction_type", [
-  "top_up",
+  "topup",
   "reading_charge",
-  "reader_credit",
-  "payout",
-  "adjustment",
+  "reader_payout",
   "refund",
-]);
-
-export const forumCategoryEnum = pgEnum("forum_category", [
-  "general",
-  "readings",
-  "spiritual_growth",
-  "ask_a_reader",
-  "announcements",
+  "admin_adjustment",
 ]);
 
 // ─── Users ──────────────────────────────────────────────────────────────────
@@ -65,32 +49,47 @@ export const users = pgTable(
   "users",
   {
     id: serial("id").primaryKey(),
-    auth0Id: varchar("auth0_id", { length: 255 }).unique().notNull(),
-    email: varchar("email", { length: 255 }).unique().notNull(),
-    username: varchar("username", { length: 50 }).unique(),
+    auth0Id: varchar("auth0_id", { length: 255 }).notNull(),
+    email: varchar("email", { length: 255 }).notNull(),
+    username: varchar("username", { length: 100 }),
     fullName: varchar("full_name", { length: 255 }),
     role: userRoleEnum("role").notNull().default("client"),
+
+    // Profile
+    profileImage: text("profile_image"),
     bio: text("bio"),
-    specialties: text("specialties"),
-    profileImage: varchar("profile_image", { length: 512 }),
-    avatarUrl: varchar("avatar_url", { length: 512 }),
+    specialties: text("specialties"), // comma-separated
+
+    // Reader pricing (cents per minute)
     pricingChat: integer("pricing_chat").notNull().default(0),
     pricingVoice: integer("pricing_voice").notNull().default(0),
     pricingVideo: integer("pricing_video").notNull().default(0),
-    accountBalance: integer("account_balance").notNull().default(0),
-    totalEarnings: integer("total_earnings").notNull().default(0),
-    totalSpent: integer("total_spent").notNull().default(0),
+
+    // Reader status
     isOnline: boolean("is_online").notNull().default(false),
+
+    // Client balance (cents, integer only)
+    balance: integer("balance").notNull().default(0),
+
+    // Reader stats
+    totalReadings: integer("total_readings").notNull().default(0),
+
+    // Stripe Connect
     stripeAccountId: varchar("stripe_account_id", { length: 255 }),
-    stripeCustomerId: varchar("stripe_customer_id", { length: 255 }),
+
+    // Timestamps
     createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
   (table) => ({
+    auth0IdIdx: uniqueIndex("users_auth0_id_idx").on(table.auth0Id),
+    emailIdx: uniqueIndex("users_email_idx").on(table.email),
     roleIdx: index("users_role_idx").on(table.role),
     isOnlineIdx: index("users_is_online_idx").on(table.isOnline),
-    auth0IdIdx: uniqueIndex("users_auth0_id_idx").on(table.auth0Id),
   }),
 );
 
@@ -106,34 +105,38 @@ export const readings = pgTable(
     readerId: integer("reader_id")
       .notNull()
       .references(() => users.id),
-    type: readingTypeEnum("type").notNull(),
+
+    readingType: readingTypeEnum("reading_type").notNull(),
     status: readingStatusEnum("status").notNull().default("pending"),
-    agoraChannelName: varchar("agora_channel_name", { length: 255 }),
-    agoraToken: text("agora_token"),
+
+    // Pricing snapshot (cents per minute at time of reading)
+    ratePerMinute: integer("rate_per_minute").notNull(),
+
+    // Timing
     startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
-    duration: integer("duration").default(0),
-    pricePerMinute: integer("price_per_minute").notNull(),
-    totalCost: integer("total_cost").notNull().default(0),
-    platformFee: integer("platform_fee").notNull().default(0),
-    readerEarnings: integer("reader_earnings").notNull().default(0),
-    paymentStatus: paymentStatusEnum("payment_status")
-      .notNull()
-      .default("pending"),
-    clientBalanceBefore: integer("client_balance_before"),
-    clientBalanceAfter: integer("client_balance_after"),
-    rating: integer("rating"),
+    durationSeconds: integer("duration_seconds").notNull().default(0),
+
+    // Billing
+    totalCharged: integer("total_charged").notNull().default(0),
+    readerEarned: integer("reader_earned").notNull().default(0),
+    platformEarned: integer("platform_earned").notNull().default(0),
+
+    // Agora
+    agoraChannel: varchar("agora_channel", { length: 255 }),
+
+    // Rating
+    rating: integer("rating"), // 1-5 stars
     review: text("review"),
-    chatTranscript: jsonb("chat_transcript").$type<
-      Array<{
-        senderId: number;
-        senderName: string;
-        content: string;
-        timestamp: string;
-      }>
-    >(),
-    billedMinutes: integer("billed_minutes").notNull().default(0),
+
+    // Grace period tracking
+    lastHeartbeat: timestamp("last_heartbeat", { withTimezone: true }),
+
+    // Timestamps
     createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
@@ -141,7 +144,6 @@ export const readings = pgTable(
     clientIdIdx: index("readings_client_id_idx").on(table.clientId),
     readerIdIdx: index("readings_reader_id_idx").on(table.readerId),
     statusIdx: index("readings_status_idx").on(table.status),
-    createdAtIdx: index("readings_created_at_idx").on(table.createdAt),
   }),
 );
 
@@ -154,13 +156,18 @@ export const transactions = pgTable(
     userId: integer("user_id")
       .notNull()
       .references(() => users.id),
-    type: transactionTypeEnum("type").notNull(),
-    amount: integer("amount").notNull(),
-    balanceBefore: integer("balance_before").notNull().default(0),
-    balanceAfter: integer("balance_after").notNull().default(0),
     readingId: integer("reading_id").references(() => readings.id),
-    stripePaymentId: varchar("stripe_payment_id", { length: 255 }),
-    description: text("description"),
+
+    type: transactionTypeEnum("type").notNull(),
+    amount: integer("amount").notNull(), // cents (positive = credit, negative = debit)
+    balanceAfter: integer("balance_after").notNull(), // balance after this tx
+
+    note: text("note"),
+
+    // Stripe
+    stripePaymentIntentId: varchar("stripe_payment_intent_id", { length: 255 }),
+
+    // Timestamps
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -169,57 +176,6 @@ export const transactions = pgTable(
     userIdIdx: index("transactions_user_id_idx").on(table.userId),
     readingIdIdx: index("transactions_reading_id_idx").on(table.readingId),
     typeIdx: index("transactions_type_idx").on(table.type),
-    createdAtIdx: index("transactions_created_at_idx").on(table.createdAt),
-  }),
-);
-
-// ─── Reviews ────────────────────────────────────────────────────────────────
-
-export const reviews = pgTable(
-  "reviews",
-  {
-    id: serial("id").primaryKey(),
-    readingId: integer("reading_id")
-      .notNull()
-      .references(() => readings.id)
-      .unique(),
-    clientId: integer("client_id")
-      .notNull()
-      .references(() => users.id),
-    readerId: integer("reader_id")
-      .notNull()
-      .references(() => users.id),
-    rating: integer("rating").notNull(),
-    comment: text("comment"),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (table) => ({
-    readerIdIdx: index("reviews_reader_id_idx").on(table.readerId),
-    clientIdIdx: index("reviews_client_id_idx").on(table.clientId),
-  }),
-);
-
-// ─── Messages (for chat readings) ──────────────────────────────────────────
-
-export const messages = pgTable(
-  "messages",
-  {
-    id: serial("id").primaryKey(),
-    readingId: integer("reading_id")
-      .notNull()
-      .references(() => readings.id),
-    senderId: integer("sender_id")
-      .notNull()
-      .references(() => users.id),
-    content: text("content").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (table) => ({
-    readingIdIdx: index("messages_reading_id_idx").on(table.readingId),
   }),
 );
 
@@ -229,15 +185,18 @@ export const forumPosts = pgTable(
   "forum_posts",
   {
     id: serial("id").primaryKey(),
-    userId: integer("user_id")
+    authorId: integer("author_id")
       .notNull()
       .references(() => users.id),
-    title: varchar("title", { length: 200 }).notNull(),
+
+    title: varchar("title", { length: 255 }).notNull(),
     content: text("content").notNull(),
-    category: forumCategoryEnum("category").notNull(),
-    flagCount: integer("flag_count").notNull().default(0),
-    commentCount: integer("comment_count").notNull().default(0),
-    isDeleted: boolean("is_deleted").notNull().default(false),
+    category: varchar("category", { length: 100 }).notNull().default("General"),
+
+    isPinned: boolean("is_pinned").notNull().default(false),
+    isLocked: boolean("is_locked").notNull().default(false),
+
+    // Timestamps
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -246,7 +205,7 @@ export const forumPosts = pgTable(
       .defaultNow(),
   },
   (table) => ({
-    userIdIdx: index("forum_posts_user_id_idx").on(table.userId),
+    authorIdIdx: index("forum_posts_author_id_idx").on(table.authorId),
     categoryIdx: index("forum_posts_category_idx").on(table.category),
     createdAtIdx: index("forum_posts_created_at_idx").on(table.createdAt),
   }),
@@ -261,19 +220,23 @@ export const forumComments = pgTable(
     postId: integer("post_id")
       .notNull()
       .references(() => forumPosts.id, { onDelete: "cascade" }),
-    userId: integer("user_id")
+    authorId: integer("author_id")
       .notNull()
       .references(() => users.id),
+
     content: text("content").notNull(),
-    flagCount: integer("flag_count").notNull().default(0),
-    isDeleted: boolean("is_deleted").notNull().default(false),
+
+    // Timestamps
     createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
   (table) => ({
     postIdIdx: index("forum_comments_post_id_idx").on(table.postId),
-    userIdIdx: index("forum_comments_user_id_idx").on(table.userId),
+    authorIdIdx: index("forum_comments_author_id_idx").on(table.authorId),
   }),
 );
 
@@ -283,38 +246,29 @@ export const forumFlags = pgTable(
   "forum_flags",
   {
     id: serial("id").primaryKey(),
+    reporterId: integer("reporter_id")
+      .notNull()
+      .references(() => users.id),
+
     postId: integer("post_id").references(() => forumPosts.id, {
       onDelete: "cascade",
     }),
     commentId: integer("comment_id").references(() => forumComments.id, {
       onDelete: "cascade",
     }),
-    reporterId: integer("reporter_id")
-      .notNull()
-      .references(() => users.id),
+
     reason: text("reason").notNull(),
     resolved: boolean("resolved").notNull().default(false),
-    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+
+    // Timestamps
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
   (table) => ({
-    postIdIdx: index("forum_flags_post_id_idx").on(table.postId),
-    commentIdIdx: index("forum_flags_comment_id_idx").on(table.commentId),
-    reporterIdIdx: index("forum_flags_reporter_id_idx").on(table.reporterId),
+    resolvedIdx: index("forum_flags_resolved_idx").on(table.resolved),
   }),
 );
-
-// ─── Newsletter Subscribers ─────────────────────────────────────────────────
-
-export const newsletterSubscribers = pgTable("newsletter_subscribers", {
-  id: serial("id").primaryKey(),
-  email: varchar("email", { length: 255 }).unique().notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
 
 // ─── Relations ──────────────────────────────────────────────────────────────
 
@@ -322,9 +276,6 @@ export const usersRelations = relations(users, ({ many }) => ({
   clientReadings: many(readings, { relationName: "clientReadings" }),
   readerReadings: many(readings, { relationName: "readerReadings" }),
   transactions: many(transactions),
-  reviews: many(reviews, { relationName: "clientReviews" }),
-  receivedReviews: many(reviews, { relationName: "readerReviews" }),
-  messages: many(messages),
   forumPosts: many(forumPosts),
   forumComments: many(forumComments),
   forumFlags: many(forumFlags),
@@ -342,8 +293,6 @@ export const readingsRelations = relations(readings, ({ one, many }) => ({
     relationName: "readerReadings",
   }),
   transactions: many(transactions),
-  review: one(reviews),
-  chatMessages: many(messages),
 }));
 
 export const transactionsRelations = relations(transactions, ({ one }) => ({
@@ -357,37 +306,9 @@ export const transactionsRelations = relations(transactions, ({ one }) => ({
   }),
 }));
 
-export const reviewsRelations = relations(reviews, ({ one }) => ({
-  reading: one(readings, {
-    fields: [reviews.readingId],
-    references: [readings.id],
-  }),
-  client: one(users, {
-    fields: [reviews.clientId],
-    references: [users.id],
-    relationName: "clientReviews",
-  }),
-  reader: one(users, {
-    fields: [reviews.readerId],
-    references: [users.id],
-    relationName: "readerReviews",
-  }),
-}));
-
-export const messagesRelations = relations(messages, ({ one }) => ({
-  reading: one(readings, {
-    fields: [messages.readingId],
-    references: [readings.id],
-  }),
-  sender: one(users, {
-    fields: [messages.senderId],
-    references: [users.id],
-  }),
-}));
-
 export const forumPostsRelations = relations(forumPosts, ({ one, many }) => ({
   author: one(users, {
-    fields: [forumPosts.userId],
+    fields: [forumPosts.authorId],
     references: [users.id],
   }),
   comments: many(forumComments),
@@ -402,7 +323,7 @@ export const forumCommentsRelations = relations(
       references: [forumPosts.id],
     }),
     author: one(users, {
-      fields: [forumComments.userId],
+      fields: [forumComments.authorId],
       references: [users.id],
     }),
   }),
