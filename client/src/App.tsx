@@ -5,6 +5,7 @@ import { ToastProvider } from './components/ToastProvider';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { CosmicBackground } from './components/CosmicBackground';
 import { Navigation } from './components/Navigation';
+import { Footer } from './components/Footer';
 
 // Pages
 import { HomePage } from './pages/HomePage';
@@ -20,29 +21,28 @@ import { NotFoundPage } from './pages/NotFoundPage';
 
 function AppRoutes() {
   return (
-    <>
+    <ErrorBoundary>
       <a href="#main-content" className="skip-link">
         Skip to main content
       </a>
       <CosmicBackground />
       <Navigation />
-      <main id="main-content">
-        <ErrorBoundary>
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/readers" element={<ReadersPage />} />
-            <Route path="/readers/:id" element={<ReaderProfilePage />} />
-            <Route path="/community" element={<CommunityHubPage />} />
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/reading/:id" element={<ReadingSessionPage />} />
-            <Route path="/about" element={<AboutPage />} />
-            <Route path="/help" element={<HelpPage />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="*" element={<NotFoundPage />} />
-          </Routes>
-        </ErrorBoundary>
+      <main id="main-content" className="page-wrapper">
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/readers" element={<ReadersPage />} />
+          <Route path="/readers/:id" element={<ReaderProfilePage />} />
+          <Route path="/community" element={<CommunityHubPage />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/reading/:id" element={<ReadingSessionPage />} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="/help" element={<HelpPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="*" element={<NotFoundPage />} />
+        </Routes>
       </main>
-    </>
+      <Footer />
+    </ErrorBoundary>
   );
 }
 
