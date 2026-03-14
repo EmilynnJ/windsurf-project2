@@ -1,65 +1,78 @@
-// ============================================================
-// Toast Notification System
-// ============================================================
+import {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  type ReactNode,
+} from 'react';
 
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
-import type { Toast, ToastType } from '../types';
+type ToastType = 'success' | 'error' | 'info' | 'warning';
+
+interface Toast {
+  id: string;
+  type: ToastType;
+  message: string;
+}
 
 interface ToastContextValue {
-  toasts: Toast[];
   addToast: (type: ToastType, message: string) => void;
-  removeToast: (id: string) => void;
 }
 
-const ToastContext = createContext<ToastContextValue | null>(null);
+const ToastContext = createContext<ToastContextValue>({
+  addToast: () => {},
+});
 
-export function useToast(): ToastContextValue {
-  const ctx = useContext(ToastContext);
-  if (!ctx) throw new Error('useToast must be used within ToastProvider');
-  return ctx;
+export function useToast() {
+  return useContext(ToastContext);
 }
-
-const TOAST_DURATION = 5000;
-let toastIdCounter = 0;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const removeToast = useCallback((id: string) => {
+  const addToast = useCallback((type: ToastType, message: string) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setToasts((prev) => [...prev, { id, type, message }]);
+
+    // Auto-dismiss after 5 seconds
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 5000);
+  }, []);
+
+  const dismiss = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  const addToast = useCallback(
-    (type: ToastType, message: string) => {
-      const id = `toast-${++toastIdCounter}`;
-      setToasts((prev) => [...prev, { id, type, message }]);
-      setTimeout(() => removeToast(id), TOAST_DURATION);
-    },
-    [removeToast]
-  );
-
-  const icons: Record<ToastType, string> = {
-    success: '✓',
-    error: '✕',
-    info: 'ℹ',
-    warning: '⚠',
-  };
-
   return (
-    <ToastContext.Provider value={{ toasts, addToast, removeToast }}>
+    <ToastContext.Provider value={{ addToast }}>
       {children}
-      <div className="toast-container" role="status" aria-live="polite">
-        {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            className={`toast toast-${toast.type}`}
-            onClick={() => removeToast(toast.id)}
-          >
-            <span>{icons[toast.type]}</span>
-            <span>{toast.message}</span>
-          </div>
-        ))}
-      </div>
+
+      {/* Toast container */}
+      {toasts.length > 0 && (
+        <div className="toast-container" aria-live="polite">
+          {toasts.map((toast) => (
+            <div
+              key={toast.id}
+              className={`toast toast--${toast.type}`}
+              role="alert"
+            >
+              <span className="toast__icon">
+                {toast.type === 'success' ? '✓' :
+                 toast.type === 'error' ? '✕' :
+                 toast.type === 'warning' ? '⚠' : 'ℹ'}
+              </span>
+              <span className="toast__message">{toast.message}</span>
+              <button
+                className="toast__close"
+                onClick={() => dismiss(toast.id)}
+                aria-label="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </ToastContext.Provider>
   );
 }

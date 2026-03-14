@@ -1,0 +1,68 @@
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { Auth0Provider } from '@auth0/auth0-react';
+import { AuthProvider } from './contexts/AuthContext';
+import { ToastProvider } from './components/ToastProvider';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { CosmicBackground } from './components/CosmicBackground';
+import { Navigation } from './components/Navigation';
+
+// Pages
+import { HomePage } from './pages/HomePage';
+import { ReadersPage } from './pages/readers/ReadersPage';
+import { ReaderProfilePage } from './pages/readers/ReaderProfilePage';
+import { CommunityHubPage } from './pages/community/CommunityHubPage';
+import { DashboardPage } from './pages/dashboard/DashboardPage';
+import { ReadingSessionPage } from './pages/reading/ReadingSessionPage';
+import { AboutPage } from './pages/AboutPage';
+import { HelpPage } from './pages/HelpPage';
+import { LoginPage } from './pages/LoginPage';
+import { NotFoundPage } from './pages/NotFoundPage';
+
+function AppRoutes() {
+  return (
+    <>
+      <a href="#main-content" className="skip-link">
+        Skip to main content
+      </a>
+      <CosmicBackground />
+      <Navigation />
+      <main id="main-content">
+        <ErrorBoundary>
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/readers" element={<ReadersPage />} />
+            <Route path="/readers/:id" element={<ReaderProfilePage />} />
+            <Route path="/community" element={<CommunityHubPage />} />
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/reading/:id" element={<ReadingSessionPage />} />
+            <Route path="/about" element={<AboutPage />} />
+            <Route path="/help" element={<HelpPage />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </ErrorBoundary>
+      </main>
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <Auth0Provider
+      domain={import.meta.env.VITE_AUTH0_DOMAIN || ''}
+      clientId={import.meta.env.VITE_AUTH0_CLIENT_ID || ''}
+      authorizationParams={{
+        redirect_uri: window.location.origin,
+        audience: import.meta.env.VITE_AUTH0_AUDIENCE || '',
+      }}
+    >
+      <BrowserRouter>
+        <ToastProvider>
+          <AuthProvider>
+            <AppRoutes />
+          </AuthProvider>
+        </ToastProvider>
+      </BrowserRouter>
+    </Auth0Provider>
+  );
+}

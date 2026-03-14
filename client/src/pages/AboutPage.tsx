@@ -1,91 +1,75 @@
-// ============================================================
-// AboutPage — About SoulSeer with founder story (exact text from guide)
-// ============================================================
+import { Card, Button } from '../components/ui';
+import { Link } from 'react-router-dom';
 
 export function AboutPage() {
   return (
-    <div className="page-content page-enter">
-      <div className="container" style={{ maxWidth: '800px' }}>
-        {/* Header */}
-        <section style={{ textAlign: 'center', padding: '40px 0 32px' }}>
-          <h1>About SoulSeer</h1>
-        </section>
-
-        {/* Mission text — EXACT copy from the corrected build guide */}
-        <section className="card-static" style={{ padding: '36px 28px', lineHeight: '1.9' }}>
-          <p style={{ fontSize: '1.05rem', marginBottom: '20px' }}>
-            At SoulSeer, we are dedicated to providing ethical, compassionate, and
-            judgment-free spiritual guidance. Our mission is twofold: to offer clients
-            genuine, heart-centered readings and to uphold fair, ethical standards for
-            our readers.
+    <div className="page-wrapper page-enter">
+      <section className="section">
+        <div className="container container--narrow">
+          <h1 className="text-center" style={{ marginBottom: 'var(--space-2)' }}>
+            About SoulSeer
+          </h1>
+          <p className="text-center" style={{ marginBottom: 'var(--space-10)', color: 'var(--text-muted)' }}>
+            Where spiritual guidance meets modern connection
           </p>
 
-          <p style={{ fontSize: '1.05rem', marginBottom: '20px' }}>
-            Founded by psychic medium Emilynn, SoulSeer was created as a response to
-            the corporate greed that dominates many psychic platforms. Unlike other
-            apps, our readers keep the majority of what they earn and play an active
-            role in shaping the platform.
-          </p>
+          {/* Vision */}
+          <Card variant="static" style={{ marginBottom: 'var(--space-6)' }}>
+            <h2 style={{ marginBottom: 'var(--space-3)', color: 'var(--accent-pink)' }}>Our Vision</h2>
+            <p style={{ lineHeight: 1.9, color: 'var(--text-secondary)' }}>
+              SoulSeer is a community-driven platform that connects seekers with gifted
+              psychic readers through live chat, voice, and video readings. Our mission is
+              to make genuine spiritual guidance accessible, personal, and transformative.
+            </p>
+            <p style={{ lineHeight: 1.9, color: 'var(--text-secondary)', marginTop: 'var(--space-3)' }}>
+              Every reading on SoulSeer is a private, real-time conversation between you
+              and your chosen reader. Whether you're seeking clarity about love, career,
+              life decisions, or spiritual growth — our community of experienced psychics
+              is here to guide you.
+            </p>
+          </Card>
 
-          <p style={{ fontSize: '1.05rem' }}>
-            SoulSeer is more than just an app — it's a soul tribe. A community of
-            gifted psychics united by our life's calling: to guide, heal, and empower
-            those who seek clarity on their journey.
-          </p>
-        </section>
-
-        <div className="divider" />
-
-        {/* Founder Section */}
-        <section style={{ textAlign: 'center', padding: '16px 0 60px' }}>
-          <h2 style={{ marginBottom: '24px' }}>Our Founder</h2>
-
-          <div
-            style={{
-              maxWidth: '320px',
-              margin: '0 auto 24px',
-              borderRadius: 'var(--radius-xl)',
-              overflow: 'hidden',
-              border: '2px solid var(--border-gold)',
-              boxShadow: '0 8px 40px rgba(212, 175, 55, 0.15)',
-            }}
-          >
-            <img
-              src="https://i.postimg.cc/s2ds9RtC/FOUNDER.jpg"
-              alt="Emilynn — Founder of SoulSeer, psychic medium"
-              style={{ width: '100%', height: 'auto', display: 'block' }}
-              loading="lazy"
-            />
+          {/* How It Works */}
+          <h2 className="text-center" style={{ marginBottom: 'var(--space-6)' }}>How It Works</h2>
+          <div className="grid grid--3" style={{ marginBottom: 'var(--space-8)' }}>
+            {[
+              { icon: '🔍', title: 'Find Your Reader', desc: 'Browse profiles, specialties, and reviews to find the perfect guide.' },
+              { icon: '💬', title: 'Choose Your Reading', desc: 'Select chat, voice, or video — connect in the way that feels right.' },
+              { icon: '✨', title: 'Receive Guidance', desc: 'Per-minute billing means you only pay for the time you need.' },
+            ].map((step, i) => (
+              <Card key={i} variant="glow-gold" className="text-center">
+                <div style={{ fontSize: '2.5rem', marginBottom: 'var(--space-3)' }}>{step.icon}</div>
+                <h3 style={{ marginBottom: 'var(--space-2)', fontSize: '1.1rem' }}>{step.title}</h3>
+                <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', lineHeight: 1.7 }}>{step.desc}</p>
+              </Card>
+            ))}
           </div>
 
-          <h3
-            style={{
-              fontFamily: 'var(--font-heading)',
-              color: 'var(--primary-pink)',
-              fontSize: '2rem',
-              marginBottom: '8px',
-            }}
-          >
-            Emilynn
-          </h3>
-          <p
-            style={{
-              color: 'var(--accent-gold)',
-              fontWeight: 600,
-              fontFamily: 'var(--font-body)',
-              fontSize: '0.95rem',
-              marginBottom: '16px',
-            }}
-          >
-            Psychic Medium &amp; Founder
-          </p>
-          <p style={{ maxWidth: '520px', margin: '0 auto', fontSize: '0.95rem' }}>
-            A gifted psychic medium with a passion for ethical spiritual practice,
-            Emilynn created SoulSeer to build a platform where both readers and clients
-            are treated with the respect and compassion they deserve.
-          </p>
-        </section>
-      </div>
+          {/* Values */}
+          <Card variant="static" style={{ marginBottom: 'var(--space-6)' }}>
+            <h2 style={{ marginBottom: 'var(--space-3)', color: 'var(--accent-gold)' }}>What We Believe</h2>
+            <ul style={{ paddingLeft: 'var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', lineHeight: 1.8, color: 'var(--text-secondary)' }}>
+              <li><strong>Authenticity</strong> — Every reader on our platform is carefully vetted for genuine ability and ethical practice.</li>
+              <li><strong>Privacy</strong> — Your readings are completely private. We never share session content.</li>
+              <li><strong>Fair Pricing</strong> — Transparent per-minute billing with no hidden fees. Readers set their own rates.</li>
+              <li><strong>Community</strong> — Our forum connects seekers and readers for shared learning and spiritual growth.</li>
+            </ul>
+          </Card>
+
+          {/* CTA */}
+          <div className="text-center" style={{ paddingTop: 'var(--space-6)' }}>
+            <h2 style={{ marginBottom: 'var(--space-4)' }}>Ready to Begin?</h2>
+            <div className="flex gap-4 justify-center">
+              <Link to="/readers">
+                <Button variant="primary" size="lg">Browse Readers</Button>
+              </Link>
+              <Link to="/community">
+                <Button variant="secondary" size="lg">Join the Community</Button>
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
