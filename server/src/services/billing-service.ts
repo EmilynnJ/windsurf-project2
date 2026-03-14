@@ -1,315 +1,110 @@
-// ============================================================
-// BillingService — Server-side per-minute billing engine
-//
-// Business rules (from build guide):
-//   - Bill every 60 seconds
-//   - 70% reader / 30% platform split: Math.floor(amount * 0.70)
-//   - Atomic DB transactions for all balance operations
-//   - 2-minute grace period for disconnection
-//   - Min $5 balance to start, end session if insufficient balance
-// ============================================================
-
-import { eq, sql } from "drizzle-orm";
-import { getDb } from "../db/db";
+import { eq, and, lt, sql } from "drizzle-orm";
+import { db } from "../db/db";
 import { users, readings, transactions } from "../db/schema";
 import { wsService } from "./websocket-service";
 import { logger } from "../utils/logger";
 
-const BILLING_INTERVAL_MS = 60_000; // 60 seconds
-const PLATFORM_FEE_RATE = 0.30;
+const TICK_INTERVAL_MS = 60_000; // 1 minute
 const GRACE_PERIOD_MS = 120_000; // 2 minutes
-
-interface ActiveSession {
-  readingId: number;
-  clientId: number;
-  readerId: number;
-  ratePerMinute: number;
-  intervalId: ReturnType<typeof setInterval>;
-  startedAt: Date;
-  totalBilled: number; // cents billed so far
-  totalReaderEarned: number; // cents reader earned so far
-  totalPlatformEarned: number; // cents platform earned so far
-  tickCount: number;
-  paused: boolean;
-  pausedAt?: Date;
-  graceTimeoutId?: ReturnType<typeof setTimeout>;
-}
+const MIN_BALANCE_CENTS = 0;
 
 class BillingService {
-  private sessions = new Map<number, ActiveSession>();
+  private timer: NodeJS.Timeout | null = null;
 
-  /** Start billing for a reading session */
-  startBilling(
-    readingId: number,
-    clientId: number,
-    readerId: number,
-    ratePerMinute: number,
-  ): void {
-    if (this.sessions.has(readingId)) {
-      logger.warn({ readingId }, "Billing already active for reading");
+  start(): void {
+    if (this.timer) return;
+    this.timer = setInterval(() => this.tick(), TICK_INTERVAL_MS);
+    logger.info("Billing service started");
+  }
+
+  shutdown(): void {
+    if (this.timer) { clearInterval(this.timer); this.timer = null; }
+    logger.info("Billing service stopped");
+  }
+
+  private async tick(): Promise<void> {
+    try {
+      // 1) Check for stale heartbeats → missed readings
+      const graceCutoff = new Date(Date.now() - GRACE_PERIOD_MS);
+      const stale = await db.select().from(readings)
+        .where(and(eq(readings.status, "active"), lt(readings.lastHeartbeat, graceCutoff)));
+
+      for (const reading of stale) {
+        await this.endReading(reading.id, "missed");
+        logger.warn({ readingId: reading.id }, "Reading ended due to stale heartbeat");
+      }
+
+      // 2) Charge active readings per minute
+      const active = await db.select().from(readings).where(eq(readings.status, "active"));
+
+      for (const reading of active) {
+        await this.chargeMinute(reading);
+      }
+    } catch (err) {
+      logger.error({ err }, "Billing tick error");
+    }
+  }
+
+  private async chargeMinute(reading: typeof readings.$inferSelect): Promise<void> {
+    const rate = reading.ratePerMinute;
+    if (rate <= 0) return;
+
+    const [client] = await db.select({ balance: users.balance }).from(users).where(eq(users.id, reading.clientId));
+    if (!client || client.balance < rate) {
+      // Insufficient balance — end reading
+      await this.endReading(reading.id, "completed");
+      wsService.broadcast([reading.clientId, reading.readerId], "reading:insufficient_balance", { readingId: reading.id });
       return;
     }
 
-    const intervalId = setInterval(() => {
-      this.tick(readingId).catch((err) => {
-        logger.error({ err, readingId }, "Billing tick failed");
-      });
-    }, BILLING_INTERVAL_MS);
+    // Charge 1 minute atomically
+    await db.update(readings).set({
+      durationSeconds: sql`${readings.durationSeconds} + 60`,
+      totalCharged: sql`${readings.totalCharged} + ${rate}`,
+      readerEarned: sql`${readings.readerEarned} + ${Math.floor(rate * 0.70)}`,
+      platformEarned: sql`${readings.platformEarned} + ${rate - Math.floor(rate * 0.70)}`,
+      updatedAt: new Date(),
+    }).where(eq(readings.id, reading.id));
 
-    const session: ActiveSession = {
-      readingId,
-      clientId,
-      readerId,
-      ratePerMinute,
-      intervalId,
-      startedAt: new Date(),
-      totalBilled: 0,
-      totalReaderEarned: 0,
-      totalPlatformEarned: 0,
-      tickCount: 0,
-      paused: false,
-    };
-
-    this.sessions.set(readingId, session);
-    logger.info(
-      { readingId, clientId, readerId, ratePerMinute },
-      "Billing started",
-    );
+    await db.update(users).set({
+      balance: sql`${users.balance} - ${rate}`,
+      updatedAt: new Date(),
+    }).where(eq(users.id, reading.clientId));
   }
 
-  /** Pause billing (disconnection — starts grace period) */
-  pauseBilling(readingId: number): void {
-    const session = this.sessions.get(readingId);
-    if (!session || session.paused) return;
-
-    session.paused = true;
-    session.pausedAt = new Date();
-    clearInterval(session.intervalId);
-
-    // Start grace period
-    session.graceTimeoutId = setTimeout(() => {
-      logger.info({ readingId }, "Grace period expired, ending session");
-      this.endBilling(readingId).catch((err) => {
-        logger.error({ err, readingId }, "Failed to end billing after grace period");
-      });
-    }, GRACE_PERIOD_MS);
-
-    wsService.send(session.clientId, "billing:paused", { readingId });
-    wsService.send(session.readerId, "billing:paused", { readingId });
-    logger.info({ readingId }, "Billing paused, grace period started");
-  }
-
-  /** Resume billing after reconnection */
-  resumeBilling(readingId: number): void {
-    const session = this.sessions.get(readingId);
-    if (!session || !session.paused) return;
-
-    session.paused = false;
-    session.pausedAt = undefined;
-
-    if (session.graceTimeoutId) {
-      clearTimeout(session.graceTimeoutId);
-      session.graceTimeoutId = undefined;
-    }
-
-    session.intervalId = setInterval(() => {
-      this.tick(readingId).catch((err) => {
-        logger.error({ err, readingId }, "Billing tick failed");
-      });
-    }, BILLING_INTERVAL_MS);
-
-    wsService.send(session.clientId, "billing:resumed", { readingId });
-    wsService.send(session.readerId, "billing:resumed", { readingId });
-    logger.info({ readingId }, "Billing resumed");
-  }
-
-  /** End billing and finalize the reading.
-   *  NOTE: tick() already handles per-minute charges (client debit + reader credit).
-   *  endBilling() only finalizes the reading record — it does NOT re-credit the reader.
-   */
-  async endBilling(readingId: number): Promise<void> {
-    const session = this.sessions.get(readingId);
-    if (!session) return;
-
-    // Clean up timers
-    clearInterval(session.intervalId);
-    if (session.graceTimeoutId) {
-      clearTimeout(session.graceTimeoutId);
-    }
-    this.sessions.delete(readingId);
-
-    // Use the running totals accumulated by tick() — no recalculation
+  private async endReading(readingId: number, status: "completed" | "missed"): Promise<void> {
     const now = new Date();
-    const durationMs = now.getTime() - session.startedAt.getTime();
-    const durationSeconds = Math.floor(durationMs / 1000);
+    const [reading] = await db.select().from(readings).where(eq(readings.id, readingId));
+    if (!reading) return;
 
-    try {
-      const db = getDb();
-      await db.transaction(async (tx) => {
-        // Finalize reading record with totals from tick()
-        await tx
-          .update(readings)
-          .set({
-            status: "completed",
-            completedAt: now,
-            durationSeconds,
-            totalCharged: session.totalBilled,
-            readerEarned: session.totalReaderEarned,
-            platformEarned: session.totalPlatformEarned,
-            updatedAt: now,
-          })
-          .where(eq(readings.id, readingId));
+    await db.update(readings).set({ status, completedAt: now, updatedAt: now }).where(eq(readings.id, readingId));
 
-        // Increment reader's total readings count
-        await tx
-          .update(users)
-          .set({
-            totalReadings: sql`${users.totalReadings} + 1`,
-            updatedAt: now,
-          })
-          .where(eq(users.id, session.readerId));
+    // Credit reader balance
+    if (reading.readerEarned > 0) {
+      const [readerAfter] = await db.update(users).set({
+        balance: sql`${users.balance} + ${reading.readerEarned}`,
+        totalReadings: sql`${users.totalReadings} + 1`,
+        updatedAt: now,
+      }).where(eq(users.id, reading.readerId)).returning({ balance: users.balance });
+
+      await db.insert(transactions).values({
+        userId: reading.readerId, readingId, type: "reader_payout",
+        amount: reading.readerEarned, balanceAfter: readerAfter?.balance ?? 0,
+        note: `Earned from reading #${readingId}`,
       });
-
-      // Notify both parties
-      const summary = {
-        readingId,
-        durationSeconds,
-        totalCharged: session.totalBilled,
-        readerEarned: session.totalReaderEarned,
-        platformEarned: session.totalPlatformEarned,
-      };
-      wsService.send(session.clientId, "billing:ended", summary);
-      wsService.send(session.readerId, "billing:ended", summary);
-      logger.info(summary, "Billing finalized");
-    } catch (err) {
-      logger.error(
-        { err, readingId, durationSeconds, totalBilled: session.totalBilled },
-        "Failed to finalize billing",
-      );
     }
-  }
 
-  /** Per-minute billing tick */
-  private async tick(readingId: number): Promise<void> {
-    const session = this.sessions.get(readingId);
-    if (!session || session.paused) return;
-
-    const { clientId, readerId, ratePerMinute } = session;
-    const readerShare = Math.floor(ratePerMinute * (1 - PLATFORM_FEE_RATE));
-    const platformShare = ratePerMinute - readerShare;
-
-    try {
-      const db = getDb();
-      await db.transaction(async (tx) => {
-        // Deduct from client — with balance check
-        const [updated] = await tx
-          .update(users)
-          .set({
-            balance: sql`${users.balance} - ${ratePerMinute}`,
-            updatedAt: new Date(),
-          })
-          .where(
-            sql`${users.id} = ${clientId} AND ${users.balance} >= ${ratePerMinute}`,
-          )
-          .returning({ id: users.id, balance: users.balance });
-
-        if (!updated) {
-          // Insufficient balance — end session
-          logger.info({ readingId, clientId }, "Insufficient balance, ending session");
-          wsService.send(clientId, "billing:insufficient_balance", { readingId });
-          wsService.send(readerId, "billing:insufficient_balance", { readingId });
-          // Schedule end outside transaction to avoid deadlock
-          setTimeout(() => {
-            this.endBilling(readingId).catch((err) => {
-              logger.error({ err, readingId }, "Failed to end billing after insufficient balance");
-            });
-          }, 0);
-          return;
-        }
-
-        // Log client transaction
-        await tx.insert(transactions).values({
-          userId: clientId,
-          readingId,
-          type: "reading_charge",
-          amount: -ratePerMinute,
-          balanceAfter: updated.balance,
-          note: `Reading #${readingId} minute charge`,
-        });
-
-        // Credit reader
-        const [readerUpdated] = await tx
-          .update(users)
-          .set({
-            balance: sql`${users.balance} + ${readerShare}`,
-            updatedAt: new Date(),
-          })
-          .where(eq(users.id, readerId))
-          .returning({ balance: users.balance });
-
-        // Log reader transaction
-        await tx.insert(transactions).values({
-          userId: readerId,
-          readingId,
-          type: "reading_charge",
-          amount: readerShare,
-          balanceAfter: readerUpdated?.balance ?? 0,
-          note: `Reading #${readingId} earnings`,
-        });
-
-        // Update reading totals incrementally
-        await tx
-          .update(readings)
-          .set({
-            totalCharged: sql`${readings.totalCharged} + ${ratePerMinute}`,
-            readerEarned: sql`${readings.readerEarned} + ${readerShare}`,
-            platformEarned: sql`${readings.platformEarned} + ${platformShare}`,
-            durationSeconds: sql`${readings.durationSeconds} + 60`,
-            lastHeartbeat: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(readings.id, readingId));
+    // Record client charge transaction
+    if (reading.totalCharged > 0) {
+      const [clientAfter] = await db.select({ balance: users.balance }).from(users).where(eq(users.id, reading.clientId));
+      await db.insert(transactions).values({
+        userId: reading.clientId, readingId, type: "reading_charge",
+        amount: -reading.totalCharged, balanceAfter: clientAfter?.balance ?? 0,
+        note: `Charged for reading #${readingId}`,
       });
-
-      // Update in-memory session totals
-      session.totalBilled += ratePerMinute;
-      session.totalReaderEarned += readerShare;
-      session.totalPlatformEarned += platformShare;
-      session.tickCount += 1;
-
-      // Notify both parties of tick
-      wsService.send(clientId, "billing:tick", {
-        readingId,
-        charged: ratePerMinute,
-        totalBilled: session.totalBilled,
-      });
-      wsService.send(readerId, "billing:tick", {
-        readingId,
-        earned: readerShare,
-      });
-
-      logger.debug(
-        { readingId, tick: session.tickCount, totalBilled: session.totalBilled },
-        "Billing tick processed",
-      );
-    } catch (err) {
-      logger.error({ err, readingId }, "Billing tick error");
     }
-  }
 
-  /** Check if a reading has active billing */
-  isActive(readingId: number): boolean {
-    return this.sessions.has(readingId);
-  }
-
-  /** Shutdown all active sessions */
-  shutdown(): void {
-    for (const [readingId, session] of this.sessions) {
-      clearInterval(session.intervalId);
-      if (session.graceTimeoutId) clearTimeout(session.graceTimeoutId);
-      logger.warn({ readingId }, "Billing session terminated by shutdown");
-    }
-    this.sessions.clear();
+    wsService.broadcast([reading.clientId, reading.readerId], "reading:ended", { readingId, status });
   }
 }
 
