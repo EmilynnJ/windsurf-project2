@@ -1,434 +1,135 @@
-// ============================================================
-// Reading Routes — On-demand reading flow, Agora tokens, chat
-// ============================================================
-
-import { Router, type Request, type Response, type NextFunction } from "express";
-import { eq, and, or, desc } from "drizzle-orm";
+import { Router } from "express";
+import { eq, and, or, desc, sql } from "drizzle-orm";
 import { z } from "zod";
-
 import { getDb } from "../db/db";
-import { users, readings } from "../db/schema";
-import { checkJwt } from "../middleware/auth";
-import { requireRole, requireParticipant } from "../middleware/rbac";
-import { validate } from "../middleware/validate";
-import { AppError } from "../middleware/error-handler";
-import { billingService } from "../services/billing-service";
+import { users, readings, transactions } from "../db/schema";
+import { requireAuth } from "../middleware/auth";
+import { validateBody } from "../middleware/validate";
 import { AgoraService } from "../services/agora-service";
 import { wsService } from "../services/websocket-service";
 import { logger } from "../utils/logger";
 
-const MIN_BALANCE_CENTS = 500; // $5.00
-
 const router = Router();
+router.use(requireAuth);
 
-// All routes require auth
-router.use(checkJwt);
+const MIN_BALANCE_CENTS = 500;
+const GRACE_PERIOD_MS = 120_000;
 
-// ── POST /api/readings/on-demand — Request an on-demand reading ──────────
-const onDemandSchema = z.object({
-  readerId: z.number().int().positive(),
-  readingType: z.enum(["chat", "voice", "video"]),
-});
+const startSchema = z.object({ readerId: z.number().int().positive(), readingType: z.enum(["chat", "voice", "video"]) });
 
-// Shared handler for creating on-demand readings
-const onDemandHandler = async (req: Request, res: Response, next: NextFunction) => {
+router.post("/start", validateBody(startSchema), async (req, res, next) => {
   try {
     const db = getDb();
-    const client = req.user!;
-    const { readerId, readingType: type } = req.body;
+    const { readerId, readingType } = req.body;
+    if (readerId === req.user!.id) { res.status(400).json({ error: "Cannot read for yourself" }); return; }
+    const [reader] = await db.select().from(users).where(and(eq(users.id, readerId), eq(users.role, "reader")));
+    if (!reader) { res.status(404).json({ error: "Reader not found" }); return; }
+    if (!reader.isOnline) { res.status(409).json({ error: "Reader is offline" }); return; }
+    const rateKey = readingType === "chat" ? "pricingChat" : readingType === "voice" ? "pricingVoice" : "pricingVideo";
+    const ratePerMinute = reader[rateKey];
+    if (!ratePerMinute) { res.status(400).json({ error: `Reader has no ${readingType} pricing` }); return; }
+    if (req.user!.balance < MIN_BALANCE_CENTS) { res.status(402).json({ error: `Minimum balance $${(MIN_BALANCE_CENTS / 100).toFixed(2)} required` }); return; }
+    const channelName = `reading_${Date.now()}_${readerId}`;
+    const [reading] = await db.insert(readings).values({
+      clientId: req.user!.id, readerId, readingType, ratePerMinute, agoraChannel: channelName, status: "pending",
+    }).returning();
+    wsService.send(readerId, "reading:request", { readingId: reading!.id, clientId: req.user!.id, readingType, clientName: req.user!.fullName });
+    const clientTokens = AgoraService.generateTokens(channelName, req.user!.id);
+    const readerTokens = AgoraService.generateTokens(channelName, readerId);
+    res.status(201).json({ reading, clientTokens, readerTokens });
+  } catch (err) { next(err); }
+});
 
-    // Get reader
-    const [reader] = await db
-      .select()
-      .from(users)
-      .where(and(eq(users.id, readerId), eq(users.role, "reader")));
-    if (!reader) throw new AppError(404, "Reader not found");
-    if (!reader.isOnline) throw new AppError(400, "Reader is not currently online");
+router.post("/:id/accept", async (req, res, next) => {
+  try {
+    const db = getDb();
+    const readingId = parseInt(req.params.id!, 10);
+    const [reading] = await db.select().from(readings).where(and(eq(readings.id, readingId), eq(readings.readerId, req.user!.id), eq(readings.status, "pending")));
+    if (!reading) { res.status(404).json({ error: "Reading not found or not pending" }); return; }
+    const now = new Date();
+    const [updated] = await db.update(readings).set({ status: "active", startedAt: now, lastHeartbeat: now, updatedAt: now }).where(eq(readings.id, readingId)).returning();
+    wsService.send(reading.clientId, "reading:accepted", { readingId });
+    res.json(updated);
+  } catch (err) { next(err); }
+});
 
-    // Get rate
-    const ratePerMinute =
-      type === "chat" ? reader.pricingChat
-      : type === "voice" ? reader.pricingVoice
-      : reader.pricingVideo;
-    if (ratePerMinute <= 0) throw new AppError(400, `This reader does not offer ${type} readings`);
+router.post("/:id/heartbeat", async (req, res, next) => {
+  try {
+    const db = getDb();
+    const readingId = parseInt(req.params.id!, 10);
+    const [reading] = await db.select().from(readings).where(and(eq(readings.id, readingId), eq(readings.status, "active"),
+      or(eq(readings.clientId, req.user!.id), eq(readings.readerId, req.user!.id))));
+    if (!reading) { res.status(404).json({ error: "Active reading not found" }); return; }
+    await db.update(readings).set({ lastHeartbeat: new Date() }).where(eq(readings.id, readingId));
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
 
-    // Check balance
-    if (client.balance < MIN_BALANCE_CENTS) {
-      throw new AppError(400, `Minimum balance of $5.00 required. Current balance: $${(client.balance / 100).toFixed(2)}`);
-    }
+router.post("/:id/end", async (req, res, next) => {
+  try {
+    const db = getDb();
+    const readingId = parseInt(req.params.id!, 10);
+    const [reading] = await db.select().from(readings).where(and(eq(readings.id, readingId),
+      or(eq(readings.clientId, req.user!.id), eq(readings.readerId, req.user!.id))));
+    if (!reading) { res.status(404).json({ error: "Reading not found" }); return; }
+    if (reading.status !== "active" && reading.status !== "paused") { res.status(409).json({ error: "Reading is not active" }); return; }
+    const now = new Date();
+    const durationSeconds = reading.startedAt ? Math.floor((now.getTime() - reading.startedAt.getTime()) / 1000) : 0;
+    const billedMinutes = Math.ceil(durationSeconds / 60);
+    const totalCharged = billedMinutes * reading.ratePerMinute;
+    const readerEarned = Math.floor(totalCharged * 0.70);
+    const platformEarned = totalCharged - readerEarned;
 
-    // Create reading
-    const [reading] = await db
-      .insert(readings)
-      .values({
-        clientId: client.id,
-        readerId,
-        readingType: type,
-        status: "pending",
-        ratePerMinute,
-        agoraChannel: "pending",
-      })
-      .returning();
-
-    // Set channel name
-    const agoraChannel = `reading_${reading!.id}`;
-    const [updated] = await db
-      .update(readings)
-      .set({ agoraChannel })
-      .where(eq(readings.id, reading!.id))
-      .returning();
-
-    // Notify reader
-    wsService.send(readerId, "reading:request", {
-      readingId: updated!.id,
-      clientName: client.fullName ?? client.username,
-      type,
-      ratePerMinute,
+    await db.transaction(async (tx) => {
+      await tx.update(readings).set({ status: "completed", completedAt: now, durationSeconds, totalCharged, readerEarned, platformEarned, updatedAt: now }).where(eq(readings.id, readingId));
+      // Charge client
+      const [clientAfter] = await tx.update(users).set({ balance: sql`${users.balance} - ${totalCharged}`, updatedAt: now }).where(eq(users.id, reading.clientId)).returning({ balance: users.balance });
+      await tx.insert(transactions).values({ userId: reading.clientId, readingId, type: "reading_charge", amount: -totalCharged, balanceAfter: clientAfter!.balance, note: `Reading #${readingId}: ${billedMinutes} min` });
+      // Credit reader
+      const [readerAfter] = await tx.update(users).set({ balance: sql`${users.balance} + ${readerEarned}`, totalReadings: sql`${users.totalReadings} + 1`, updatedAt: now }).where(eq(users.id, reading.readerId)).returning({ balance: users.balance });
+      await tx.insert(transactions).values({ userId: reading.readerId, readingId, type: "reader_payout", amount: readerEarned, balanceAfter: readerAfter!.balance, note: `Earned from reading #${readingId}` });
     });
 
-    res.status(201).json(updated);
-  } catch (err) {
-    next(err);
-  }
-};
+    wsService.broadcast([reading.clientId, reading.readerId], "reading:ended", { readingId, durationSeconds, totalCharged, readerEarned });
+    res.json({ readingId, durationSeconds, totalCharged, readerEarned, platformEarned });
+  } catch (err) { next(err); }
+});
 
-router.post("/on-demand", requireRole("client"), validate(onDemandSchema), onDemandHandler);
+router.post("/:id/rate", async (req, res, next) => {
+  try {
+    const db = getDb();
+    const readingId = parseInt(req.params.id!, 10);
+    const { rating, review } = req.body;
+    if (!rating || rating < 1 || rating > 5) { res.status(400).json({ error: "Rating must be 1-5" }); return; }
+    const [reading] = await db.select().from(readings).where(and(eq(readings.id, readingId), eq(readings.clientId, req.user!.id), eq(readings.status, "completed")));
+    if (!reading) { res.status(404).json({ error: "Completed reading not found" }); return; }
+    const [updated] = await db.update(readings).set({ rating, review: review || null, updatedAt: new Date() }).where(eq(readings.id, readingId)).returning();
+    res.json(updated);
+  } catch (err) { next(err); }
+});
 
-// ── GET /api/readings/:id — Get single reading details ─────────────────
+router.get("/history", async (req, res, next) => {
+  try {
+    const db = getDb();
+    const userId = req.user!.id;
+    const result = await db.select().from(readings)
+      .where(or(eq(readings.clientId, userId), eq(readings.readerId, userId)))
+      .orderBy(desc(readings.createdAt)).limit(50);
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
 router.get("/:id", async (req, res, next) => {
   try {
     const db = getDb();
     const readingId = parseInt(req.params.id!, 10);
-    const userId = req.user!.id;
-
-    const [reading] = await db
-      .select()
-      .from(readings)
-      .where(eq(readings.id, readingId));
-    if (!reading) throw new AppError(404, "Reading not found");
-    if (reading.clientId !== userId && reading.readerId !== userId) {
-      throw new AppError(403, "You are not a participant in this reading");
-    }
-
-    // Get participant names
-    const [reader] = await db.select({ fullName: users.fullName, username: users.username, profileImage: users.profileImage }).from(users).where(eq(users.id, reading.readerId));
-    const [client] = await db.select({ fullName: users.fullName, username: users.username }).from(users).where(eq(users.id, reading.clientId));
-
-    res.json({
-      ...reading,
-      readerName: reader?.fullName ?? reader?.username ?? 'Reader',
-      clientName: client?.fullName ?? client?.username ?? 'Client',
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ── GET /api/readings/:id/messages — Get chat messages ─────────────────
-router.get("/:id/messages", async (req, res, next) => {
-  try {
-    // Chat messages would be stored in a separate table or in-memory
-    // For now return empty array - messages are handled via WebSocket
-    res.json([]);
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ── POST /api/readings/:id/messages — Send chat message ────────────────
-router.post("/:id/messages", async (req, res, next) => {
-  try {
-    const readingId = parseInt(req.params.id!, 10);
-    const userId = req.user!.id;
-    const { content } = req.body;
-
-    // Broadcast via WebSocket
-    const db = getDb();
     const [reading] = await db.select().from(readings).where(eq(readings.id, readingId));
-    if (!reading) throw new AppError(404, "Reading not found");
-    if (reading.clientId !== userId && reading.readerId !== userId) {
-      throw new AppError(403, "Not a participant");
+    if (!reading) { res.status(404).json({ error: "Reading not found" }); return; }
+    if (reading.clientId !== req.user!.id && reading.readerId !== req.user!.id && req.user!.role !== "admin") {
+      res.status(403).json({ error: "Not a participant" }); return;
     }
-
-    const message = {
-      id: Date.now(),
-      senderId: userId,
-      content,
-      createdAt: new Date().toISOString(),
-    };
-
-    // Send to both participants
-    const otherId = userId === reading.clientId ? reading.readerId : reading.clientId;
-    wsService.send(otherId, "chat:message", { readingId, message });
-
-    res.status(201).json(message);
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ── POST /api/readings — Alias for on-demand (client sends here) ───────
-router.post("/", requireRole("client"), validate(onDemandSchema), onDemandHandler);
-
-// ── POST /api/readings/:id/accept — Reader accepts reading ──────────────
-router.post("/:id/accept", requireRole("reader"), async (req, res, next) => {
-  try {
-    const db = getDb();
-    const readingId = parseInt(req.params.id!, 10);
-    const reader = req.user!;
-
-    const [reading] = await db
-      .select()
-      .from(readings)
-      .where(
-        and(
-          eq(readings.id, readingId),
-          eq(readings.readerId, reader.id),
-          eq(readings.status, "pending"),
-        ),
-      );
-    if (!reading) throw new AppError(404, "Reading not found or already accepted");
-
-    const [updated] = await db
-      .update(readings)
-      .set({ status: "active", updatedAt: new Date() })
-      .where(eq(readings.id, readingId))
-      .returning();
-
-    // Notify client
-    wsService.send(reading.clientId, "reading:accepted", {
-      readingId,
-      readerName: reader.fullName ?? reader.username,
-    });
-
-    res.json(updated);
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ── POST /api/readings/:id/agora-token — Get Agora token ────────────────
-router.post("/:id/agora-token", async (req, res, next) => {
-  try {
-    const db = getDb();
-    const readingId = parseInt(req.params.id!, 10);
-    const userId = req.user!.id;
-
-    const [reading] = await db
-      .select()
-      .from(readings)
-      .where(eq(readings.id, readingId));
-    if (!reading) throw new AppError(404, "Reading not found");
-    if (reading.clientId !== userId && reading.readerId !== userId) {
-      throw new AppError(403, "You are not a participant in this reading");
-    }
-    if (!reading.agoraChannel || reading.agoraChannel === "pending") {
-      throw new AppError(400, "Reading channel not ready");
-    }
-
-    const tokens = AgoraService.generateTokens(
-      reading.agoraChannel,
-      userId,
-      "publisher",
-    );
-
-    res.json({
-      channel: reading.agoraChannel,
-      ...tokens,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ── POST /api/readings/:id/start — Both joined, start billing ───────────
-router.post("/:id/start", async (req, res, next) => {
-  try {
-    const db = getDb();
-    const readingId = parseInt(req.params.id!, 10);
-    const userId = req.user!.id;
-
-    const [reading] = await db
-      .select()
-      .from(readings)
-      .where(eq(readings.id, readingId));
-    if (!reading) throw new AppError(404, "Reading not found");
-    if (reading.clientId !== userId && reading.readerId !== userId) {
-      throw new AppError(403, "You are not a participant in this reading");
-    }
-
-    // Only start if active (accepted) and not already started
-    if (reading.status !== "active") {
-      throw new AppError(400, "Reading is not in the active state");
-    }
-    if (reading.startedAt) {
-      // Already started — just return success (idempotent)
-      res.json({ started: true, readingId });
-      return;
-    }
-
-    const now = new Date();
-    await db
-      .update(readings)
-      .set({ startedAt: now, lastHeartbeat: now, updatedAt: now })
-      .where(eq(readings.id, readingId));
-
-    // Start server-side billing
-    billingService.startBilling(
-      readingId,
-      reading.clientId,
-      reading.readerId,
-      reading.ratePerMinute,
-    );
-
-    logger.info({ readingId }, "Reading session started");
-    res.json({ started: true, readingId });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ── POST /api/readings/:id/end — End reading session ────────────────────
-router.post("/:id/end", async (req, res, next) => {
-  try {
-    const readingId = parseInt(req.params.id!, 10);
-    const db = getDb();
-    const userId = req.user!.id;
-
-    const [reading] = await db
-      .select()
-      .from(readings)
-      .where(eq(readings.id, readingId));
-    if (!reading) throw new AppError(404, "Reading not found");
-    if (reading.clientId !== userId && reading.readerId !== userId) {
-      throw new AppError(403, "You are not a participant in this reading");
-    }
-
-    // End billing (handles all finalization)
-    await billingService.endBilling(readingId);
-
-    // Fetch final state
-    const [finalized] = await db
-      .select()
-      .from(readings)
-      .where(eq(readings.id, readingId));
-
-    res.json(finalized);
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ── POST /api/readings/:id/rate — Submit rating and review ──────────────
-const rateSchema = z.object({
-  rating: z.number().int().min(1).max(5),
-  review: z.string().max(2000).optional(),
-});
-
-router.post(
-  "/:id/rate",
-  requireRole("client"),
-  validate(rateSchema),
-  async (req, res, next) => {
-    try {
-      const db = getDb();
-      const readingId = parseInt(req.params.id!, 10);
-      const client = req.user!;
-
-      const [reading] = await db
-        .select()
-        .from(readings)
-        .where(
-          and(
-            eq(readings.id, readingId),
-            eq(readings.clientId, client.id),
-            eq(readings.status, "completed"),
-          ),
-        );
-      if (!reading) throw new AppError(404, "Completed reading not found");
-      if (reading.rating) throw new AppError(400, "Already rated");
-
-      const [updated] = await db
-        .update(readings)
-        .set({
-          rating: req.body.rating,
-          review: req.body.review ?? null,
-          updatedAt: new Date(),
-        })
-        .where(eq(readings.id, readingId))
-        .returning();
-
-      res.json(updated);
-    } catch (err) {
-      next(err);
-    }
-  },
-);
-
-// ── GET /api/readings/client — Client's reading history ─────────────────
-router.get("/client", requireRole("client"), async (req, res, next) => {
-  try {
-    const db = getDb();
-    const clientId = req.user!.id;
-
-    const result = await db
-      .select({
-        id: readings.id,
-        readingType: readings.readingType,
-        status: readings.status,
-        ratePerMinute: readings.ratePerMinute,
-        startedAt: readings.startedAt,
-        completedAt: readings.completedAt,
-        durationSeconds: readings.durationSeconds,
-        totalCharged: readings.totalCharged,
-        rating: readings.rating,
-        review: readings.review,
-        createdAt: readings.createdAt,
-        readerName: users.fullName,
-        readerUsername: users.username,
-        readerImage: users.profileImage,
-      })
-      .from(readings)
-      .innerJoin(users, eq(readings.readerId, users.id))
-      .where(eq(readings.clientId, clientId))
-      .orderBy(desc(readings.createdAt));
-
-    res.json(result);
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ── GET /api/readings/reader — Reader's session history ─────────────────
-router.get("/reader", requireRole("reader"), async (req, res, next) => {
-  try {
-    const db = getDb();
-    const readerId = req.user!.id;
-
-    const result = await db
-      .select({
-        id: readings.id,
-        readingType: readings.readingType,
-        status: readings.status,
-        ratePerMinute: readings.ratePerMinute,
-        startedAt: readings.startedAt,
-        completedAt: readings.completedAt,
-        durationSeconds: readings.durationSeconds,
-        readerEarned: readings.readerEarned,
-        rating: readings.rating,
-        review: readings.review,
-        createdAt: readings.createdAt,
-        // Privacy: show client ID, not personal info
-        clientId: readings.clientId,
-      })
-      .from(readings)
-      .where(eq(readings.readerId, readerId))
-      .orderBy(desc(readings.createdAt));
-
-    res.json(result);
-  } catch (err) {
-    next(err);
-  }
+    res.json(reading);
+  } catch (err) { next(err); }
 });
 
 export default router;
