@@ -3,263 +3,307 @@ import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../../components/ToastProvider';
 import { apiService } from '../../services/api';
 import {
-  Button, Card, Avatar, Badge,
-  Textarea, SearchInput, LoadingPage, EmptyState, Pagination,
+  Button,
+  Avatar,
+  Input,
+  Textarea,
+  Select,
+  Pagination,
+  LoadingPage,
+  EmptyState,
 } from '../../components/ui';
+import type { ForumPost, ForumComment, ForumCategory } from '../../types';
 
-/* ─── Types ───────────────────────────────────────────────────── */
+/* ── Constants ──────────────────────────────────────────────── */
+const POSTS_PER_PAGE = 10;
 
-interface ForumPost {
-  id: number;
-  userId: number;
-  userName?: string;
-  userAvatar?: string;
-  category: string;
-  title: string;
-  content: string;
-  commentCount: number;
-  createdAt: string;
-}
-
-interface Comment {
-  id: number;
-  userId: number;
-  userName?: string;
-  userAvatar?: string;
-  content: string;
-  createdAt: string;
-}
-
-const CATEGORIES = [
+const CATEGORIES: { value: ForumCategory | ''; label: string }[] = [
   { value: '', label: 'All Categories' },
-  { value: 'general', label: '💬 General' },
-  { value: 'readings', label: '🔮 Readings' },
-  { value: 'spiritual_growth', label: '🌱 Spiritual Growth' },
-  { value: 'introductions', label: '👋 Introductions' },
-  { value: 'off_topic', label: '🎯 Off Topic' },
+  { value: 'general', label: 'General' },
+  { value: 'readings', label: 'Readings' },
+  { value: 'spiritual_growth', label: 'Spiritual Growth' },
+  { value: 'introductions', label: 'Introductions' },
+  { value: 'off_topic', label: 'Off Topic' },
 ];
 
-const ITEMS_PER_PAGE = 10;
+const CATEGORY_LABELS: Record<string, string> = {
+  general: 'General',
+  readings: 'Readings',
+  spiritual_growth: 'Spiritual Growth',
+  introductions: 'Introductions',
+  off_topic: 'Off Topic',
+};
 
-/* ─── Post Card ───────────────────────────────────────────────── */
+const CREATE_CATEGORY_OPTIONS = CATEGORIES.filter((c) => c.value !== '');
 
-function PostCard({
-  post,
-  onSelect,
-}: {
-  post: ForumPost;
-  onSelect: (post: ForumPost) => void;
-}) {
-  return (
-    <Card className="post-card" onClick={() => onSelect(post)} style={{ cursor: 'pointer' }}>
-      <div className="flex gap-3">
-        <Avatar src={post.userAvatar} name={post.userName} size="md" />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="flex items-center gap-2 flex-wrap" style={{ marginBottom: '4px' }}>
-            <Badge variant="gold" size="sm">{post.category.replace(/_/g, ' ')}</Badge>
-            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-              {post.userName || 'Anonymous'} · {new Date(post.createdAt).toLocaleDateString()}
-            </span>
-          </div>
-          <h4 style={{ fontSize: '1.05rem', marginBottom: '4px' }}>{post.title}</h4>
-          <p
-            style={{
-              fontSize: '0.88rem',
-              color: 'var(--text-secondary)',
-              display: '-webkit-box',
-              WebkitLineClamp: 2,
-              WebkitBoxOrient: 'vertical',
-              overflow: 'hidden',
-            }}
-          >
-            {post.content}
-          </p>
-          <div className="flex items-center gap-4" style={{ marginTop: '8px' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              💬 {post.commentCount} {post.commentCount === 1 ? 'reply' : 'replies'}
-            </span>
-          </div>
-        </div>
-      </div>
-    </Card>
-  );
+/* ── Helpers ────────────────────────────────────────────────── */
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
 }
 
-/* ─── Post Detail ─────────────────────────────────────────────── */
-
-function PostDetail({
+/* ── Single Post Card ───────────────────────────────────────── */
+function PostCard({
   post,
-  onBack,
+  isLoggedIn,
+  userId,
+  userRole,
+  onFlag,
+  onDelete,
 }: {
   post: ForumPost;
-  onBack: () => void;
+  isLoggedIn: boolean;
+  userId: number | null;
+  userRole: string | null;
+  onFlag: (postId: number) => void;
+  onDelete: (postId: number) => void;
 }) {
-  const { isAuthenticated } = useAuth();
-  const { addToast } = useToast();
-  const [comments, setComments] = useState<Comment[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [newComment, setNewComment] = useState('');
+  const [comments, setComments] = useState<ForumComment[]>([]);
+  const [showComments, setShowComments] = useState(false);
+  const [commentText, setCommentText] = useState('');
+  const [loadingComments, setLoadingComments] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const { addToast } = useToast();
 
   const loadComments = useCallback(async () => {
+    setLoadingComments(true);
     try {
-      const data = await apiService.get(`/api/forum/posts/${post.id}/comments`);
-      setComments(data as Comment[]);
+      const data = await apiService.get<ForumComment[]>(`/api/forum/posts/${post.id}/comments`);
+      setComments(data);
     } catch {
-      // handle silently
+      addToast('error', 'Failed to load comments');
     } finally {
-      setLoading(false);
+      setLoadingComments(false);
     }
-  }, [post.id]);
+  }, [post.id, addToast]);
 
-  useEffect(() => { loadComments(); }, [loadComments]);
+  const toggleComments = () => {
+    if (!showComments && comments.length === 0) loadComments();
+    setShowComments((v) => !v);
+  };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleComment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newComment.trim()) return;
+    if (!commentText.trim()) return;
     setSubmitting(true);
     try {
-      await apiService.post(`/api/forum/posts/${post.id}/comments`, {
-        content: newComment.trim(),
-      });
-      setNewComment('');
-      loadComments();
-      addToast('success', 'Reply posted! ✨');
+      const newComment = await apiService.post<ForumComment>(
+        `/api/forum/posts/${post.id}/comments`,
+        { content: commentText.trim() }
+      );
+      setComments((prev) => [...prev, newComment]);
+      setCommentText('');
+      addToast('success', 'Comment posted!');
     } catch {
-      addToast('error', 'Failed to post reply');
+      addToast('error', 'Failed to post comment');
     } finally {
       setSubmitting(false);
     }
   };
 
+  const handleFlagComment = async (commentId: number) => {
+    try {
+      await apiService.post(`/api/forum/comments/${commentId}/flag`);
+      addToast('info', 'Comment flagged for review');
+    } catch {
+      addToast('error', 'Failed to flag comment');
+    }
+  };
+
+  const handleDeleteComment = async (commentId: number) => {
+    try {
+      await apiService.delete(`/api/forum/comments/${commentId}`);
+      setComments((prev) => prev.filter((c) => c.id !== commentId));
+      addToast('success', 'Comment deleted');
+    } catch {
+      addToast('error', 'Failed to delete comment');
+    }
+  };
+
   return (
-    <div className="flex flex-col gap-4">
-      <Button variant="ghost" size="sm" onClick={onBack}>
-        ← Back to Community
-      </Button>
-
-      {/* Post */}
-      <Card variant="static">
-        <div className="flex gap-3" style={{ marginBottom: 'var(--space-4)' }}>
-          <Avatar src={post.userAvatar} name={post.userName} size="md" />
-          <div>
-            <Badge variant="gold" size="sm">{post.category.replace(/_/g, ' ')}</Badge>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginLeft: '8px' }}>
-              {post.userName || 'Anonymous'} · {new Date(post.createdAt).toLocaleString()}
-            </span>
-          </div>
+    <div className="card card--static forum-post">
+      {/* ── Post Header ── */}
+      <div className="forum-post__header">
+        <Avatar
+          src={post.userAvatar}
+          name={post.userName}
+          size="sm"
+        />
+        <div className="forum-post__meta">
+          <span className="forum-post__author">{post.userName || 'Anonymous'}</span>
+          <span className="forum-post__time">
+            {timeAgo(post.createdAt)} · {CATEGORY_LABELS[post.category] || post.category}
+          </span>
         </div>
-        <h2 style={{ fontSize: '1.8rem', marginBottom: 'var(--space-4)' }}>{post.title}</h2>
-        <div style={{ lineHeight: 1.8, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>
-          {post.content}
-        </div>
-      </Card>
+      </div>
 
-      {/* Comments */}
-      <h3 style={{ marginTop: 'var(--space-4)' }}>
-        Replies ({comments.length})
-      </h3>
+      {/* ── Post Content ── */}
+      <h3 className="forum-post__title">{post.title}</h3>
+      <p className="forum-post__body">{post.content}</p>
 
-      {loading ? (
-        <div className="loading-center"><div className="spinner" /></div>
-      ) : comments.length === 0 ? (
-        <Card variant="static" className="text-center">
-          <p style={{ color: 'var(--text-muted)', padding: 'var(--space-4)' }}>
-            No replies yet — be the first to respond!
-          </p>
-        </Card>
-      ) : (
-        <div className="flex flex-col gap-3">
-          {comments.map((c) => (
-            <Card key={c.id} variant="static">
-              <div className="flex gap-3">
-                <Avatar src={c.userAvatar} name={c.userName} size="sm" />
-                <div style={{ flex: 1 }}>
-                  <div className="flex items-center gap-2" style={{ marginBottom: '4px' }}>
-                    <strong style={{ fontSize: '0.9rem' }}>{c.userName || 'Anonymous'}</strong>
-                    <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                      {new Date(c.createdAt).toLocaleString()}
-                    </span>
+      {/* ── Post Actions ── */}
+      <div className="forum-post__actions">
+        <button
+          className="btn btn--ghost btn--sm"
+          onClick={toggleComments}
+          aria-expanded={showComments}
+          aria-label={`${post.commentCount} comments`}
+        >
+          💬 {post.commentCount} comment{post.commentCount !== 1 ? 's' : ''}
+        </button>
+        {isLoggedIn && (
+          <button
+            className="btn btn--ghost btn--sm"
+            onClick={() => onFlag(post.id)}
+            aria-label="Flag this post"
+          >
+            🚩 Flag
+          </button>
+        )}
+        {(userRole === 'admin' || userId === post.userId) && (
+          <button
+            className="btn btn--ghost btn--sm"
+            onClick={() => onDelete(post.id)}
+            aria-label="Delete this post"
+          >
+            🗑️ Delete
+          </button>
+        )}
+      </div>
+
+      {/* ── Comments ── */}
+      {showComments && (
+        <div className="flex flex-col gap-3" style={{ marginTop: 'var(--space-3)' }}>
+          {loadingComments ? (
+            <p className="caption text-center">Loading comments...</p>
+          ) : comments.length === 0 ? (
+            <p className="caption text-center">No comments yet.</p>
+          ) : (
+            comments.map((comment) => (
+              <div key={comment.id} className="forum-comment">
+                <Avatar src={comment.userAvatar} name={comment.userName} size="sm" />
+                <div className="forum-comment__body">
+                  <div className="forum-comment__meta">
+                    <span className="forum-comment__author">{comment.userName || 'Anonymous'}</span>
+                    <span className="forum-comment__time">{timeAgo(comment.createdAt)}</span>
+                    {isLoggedIn && (
+                      <button
+                        className="btn btn--ghost btn--sm"
+                        onClick={() => handleFlagComment(comment.id)}
+                        aria-label="Flag comment"
+                      >
+                        🚩
+                      </button>
+                    )}
+                    {(userRole === 'admin' || userId === comment.userId) && (
+                      <button
+                        className="btn btn--ghost btn--sm"
+                        onClick={() => handleDeleteComment(comment.id)}
+                        aria-label="Delete comment"
+                      >
+                        🗑️
+                      </button>
+                    )}
                   </div>
-                  <p style={{ fontSize: '0.9rem', lineHeight: 1.7, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>
-                    {c.content}
-                  </p>
+                  <p className="forum-comment__text">{comment.content}</p>
                 </div>
               </div>
-            </Card>
-          ))}
-        </div>
-      )}
+            ))
+          )}
 
-      {/* Reply form */}
-      {isAuthenticated ? (
-        <form onSubmit={handleSubmit}>
-          <Card variant="static">
-            <Textarea
-              label="Write a Reply"
-              value={newComment}
-              onChange={(e) => setNewComment(e.target.value)}
-              placeholder="Share your thoughts..."
-              rows={3}
-            />
-            <div style={{ marginTop: 'var(--space-3)', textAlign: 'right' }}>
-              <Button type="submit" variant="primary" loading={submitting} disabled={!newComment.trim()}>
-                Post Reply
+          {/* ── Comment Form ── */}
+          {isLoggedIn ? (
+            <form className="flex gap-2 items-end" onSubmit={handleComment}>
+              <div className="flex-1">
+                <Input
+                  placeholder="Write a comment..."
+                  value={commentText}
+                  onChange={(e) => setCommentText(e.target.value)}
+                  aria-label="Comment text"
+                />
+              </div>
+              <Button
+                type="submit"
+                variant="primary"
+                size="sm"
+                loading={submitting}
+                disabled={!commentText.trim()}
+              >
+                Reply
               </Button>
-            </div>
-          </Card>
-        </form>
-      ) : (
-        <Card variant="static" className="text-center">
-          <p style={{ color: 'var(--text-muted)' }}>
-            Sign in to join the conversation.
-          </p>
-        </Card>
+            </form>
+          ) : (
+            <p className="caption text-center">
+              <a href="/login">Sign in</a> to leave a comment.
+            </p>
+          )}
+        </div>
       )}
     </div>
   );
 }
 
-/* ─── Main Page ───────────────────────────────────────────────── */
-
+/* ── Community Hub Page ─────────────────────────────────────── */
 export function CommunityHubPage() {
-  const { isAuthenticated } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const { addToast } = useToast();
 
+  // Forum state
   const [posts, setPosts] = useState<ForumPost[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [category, setCategory] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [category, setCategory] = useState<ForumCategory | ''>('');
   const [page, setPage] = useState(1);
-  const [selectedPost, setSelectedPost] = useState<ForumPost | null>(null);
+  const [totalCount, setTotalCount] = useState(0);
 
-  // New post form
-  const [showNewPost, setShowNewPost] = useState(false);
+  // Create post form
+  const [showCreate, setShowCreate] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newContent, setNewContent] = useState('');
-  const [newCategory, setNewCategory] = useState('general');
-  const [creatingPost, setCreatingPost] = useState(false);
+  const [newCategory, setNewCategory] = useState<string>('general');
+  const [creating, setCreating] = useState(false);
 
+  /* ── Fetch posts ── */
   const fetchPosts = useCallback(async () => {
+    setIsLoading(true);
     try {
-      const data = await apiService.get('/api/forum/posts');
-      setPosts(data as ForumPost[]);
+      const query = new URLSearchParams({
+        page: String(page),
+        limit: String(POSTS_PER_PAGE),
+        sort: 'newest',
+      });
+      if (category) query.set('category', category);
+
+      const data = await apiService.get<{ posts: ForumPost[]; total: number }>(
+        `/api/forum/posts?${query.toString()}`
+      );
+      setPosts(data.posts || []);
+      setTotalCount(data.total || 0);
     } catch {
-      // silently handle
+      addToast('error', 'Failed to load posts');
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
-  }, []);
+  }, [page, category, addToast]);
 
-  useEffect(() => { fetchPosts(); }, [fetchPosts]);
+  useEffect(() => {
+    fetchPosts();
+  }, [fetchPosts]);
 
+  /* ── Create post ── */
   const handleCreatePost = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim() || !newContent.trim()) {
-      addToast('error', 'Title and content are required');
+      addToast('error', 'Please fill in the title and content.');
       return;
     }
-    setCreatingPost(true);
+    setCreating(true);
     try {
       await apiService.post('/api/forum/posts', {
         title: newTitle.trim(),
@@ -267,148 +311,206 @@ export function CommunityHubPage() {
         category: newCategory,
       });
       addToast('success', 'Post created! ✨');
-      setShowNewPost(false);
       setNewTitle('');
       setNewContent('');
+      setShowCreate(false);
+      setPage(1);
       fetchPosts();
     } catch {
       addToast('error', 'Failed to create post');
     } finally {
-      setCreatingPost(false);
+      setCreating(false);
     }
   };
 
-  // Filter posts
-  const filtered = posts.filter((p) => {
-    if (category && p.category !== category) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      if (!p.title.toLowerCase().includes(q) && !p.content.toLowerCase().includes(q)) return false;
+  /* ── Flag / Delete handlers ── */
+  const handleFlag = async (postId: number) => {
+    try {
+      await apiService.post(`/api/forum/posts/${postId}/flag`);
+      addToast('info', 'Post flagged for review');
+    } catch {
+      addToast('error', 'Failed to flag post');
     }
-    return true;
-  });
+  };
 
-  const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE);
-  const pageItems = filtered.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
+  const handleDelete = async (postId: number) => {
+    try {
+      await apiService.delete(`/api/forum/posts/${postId}`);
+      setPosts((prev) => prev.filter((p) => p.id !== postId));
+      addToast('success', 'Post deleted');
+    } catch {
+      addToast('error', 'Failed to delete post');
+    }
+  };
 
-  // If viewing a specific post
-  if (selectedPost) {
-    return (
-      <div className="page-wrapper page-enter">
-        <div className="container" style={{ paddingTop: 'var(--space-6)' }}>
-          <PostDetail post={selectedPost} onBack={() => setSelectedPost(null)} />
-        </div>
-      </div>
-    );
-  }
+  const totalPages = Math.ceil(totalCount / POSTS_PER_PAGE);
 
   return (
-    <div className="page-wrapper page-enter">
-      <div className="container" style={{ paddingTop: 'var(--space-6)' }}>
-        <div className="flex items-center justify-between flex-wrap gap-3" style={{ marginBottom: 'var(--space-6)' }}>
-          <div>
-            <h1 style={{ marginBottom: 'var(--space-1)' }}>Community Hub</h1>
-            <p style={{ color: 'var(--text-muted)' }}>Connect, share, and grow together</p>
-          </div>
-          {isAuthenticated && (
-            <Button variant="primary" onClick={() => setShowNewPost(!showNewPost)}>
-              {showNewPost ? 'Cancel' : '+ New Post'}
-            </Button>
-          )}
-        </div>
+    <div className="page-enter">
+      <div className="container">
+        {/* ── Title ──────────────────────────────────── */}
+        <section className="section section--hero section--cosmic">
+          <h1 className="heading-1">Community Hub</h1>
+          <p className="hero__tagline">Connect, share, and grow together</p>
+          <div className="divider" />
+        </section>
 
-        {/* New post form */}
-        {showNewPost && (
-          <Card variant="glow-pink" style={{ marginBottom: 'var(--space-6)' }}>
-            <form onSubmit={handleCreatePost} className="flex flex-col gap-4">
-              <h3>Create a Post</h3>
-              <div className="form-group">
-                <label className="form-label">Category</label>
-                <select
-                  className="form-select"
-                  value={newCategory}
-                  onChange={(e) => setNewCategory(e.target.value)}
-                >
-                  {CATEGORIES.filter((c) => c.value).map((c) => (
-                    <option key={c.value} value={c.value}>{c.label}</option>
-                  ))}
-                </select>
+        {/* ── Community Links ────────────────────────── */}
+        <section className="section">
+          <div className="grid grid--2">
+            <a
+              href="https://www.facebook.com/groups/soulseer"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="card card--interactive community-link"
+              aria-label="Join SoulSeer Facebook Group (opens in new tab)"
+            >
+              <span className="community-link__icon" aria-hidden="true">📘</span>
+              <div>
+                <p className="community-link__title">Facebook Group</p>
+                <p className="community-link__desc">
+                  Join our Facebook community for daily spiritual insights, live events,
+                  and heartfelt conversations.
+                </p>
               </div>
-              <div className="form-group">
-                <label className="form-label form-label--required">Title</label>
-                <input
-                  className="form-input"
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  placeholder="What's on your mind?"
-                  maxLength={200}
-                />
+            </a>
+            <a
+              href="https://discord.gg/soulseer"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="card card--interactive community-link"
+              aria-label="Join SoulSeer Discord Server (opens in new tab)"
+            >
+              <span className="community-link__icon" aria-hidden="true">💜</span>
+              <div>
+                <p className="community-link__title">Discord Server</p>
+                <p className="community-link__desc">
+                  Chat in real-time with readers and seekers in our thriving Discord
+                  community.
+                </p>
               </div>
+            </a>
+          </div>
+        </section>
+
+        <div className="divider--full divider" />
+
+        {/* ── Forum Section ──────────────────────────── */}
+        <section className="section">
+          <div className="flex justify-between items-center flex-wrap gap-4">
+            <div className="section-title" style={{ marginBottom: 0 }}>
+              <h2 className="section-title__text">Forum</h2>
+            </div>
+            {isAuthenticated && (
+              <Button
+                variant="primary"
+                onClick={() => setShowCreate((v) => !v)}
+              >
+                {showCreate ? 'Cancel' : '+ New Post'}
+              </Button>
+            )}
+          </div>
+
+          {/* ── Create Post Form ── */}
+          {showCreate && isAuthenticated && (
+            <form
+              className="card card--elevated flex flex-col gap-4"
+              onSubmit={handleCreatePost}
+              style={{ marginTop: 'var(--space-5)' }}
+            >
+              <h3 className="heading-4">Create a Post</h3>
+              <Input
+                label="Title"
+                required
+                placeholder="What's on your mind?"
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+              />
               <Textarea
                 label="Content"
+                required
+                placeholder="Share your thoughts, experiences, or questions..."
                 value={newContent}
                 onChange={(e) => setNewContent(e.target.value)}
-                placeholder="Share your thoughts, experiences, or questions..."
-                rows={5}
-                required
               />
-              <div style={{ textAlign: 'right' }}>
-                <Button type="submit" variant="primary" loading={creatingPost}>
-                  Post
+              <Select
+                label="Category"
+                options={CREATE_CATEGORY_OPTIONS.map((c) => ({
+                  value: c.value,
+                  label: c.label,
+                }))}
+                value={newCategory}
+                onChange={(e) => setNewCategory(e.target.value)}
+              />
+              <div className="flex gap-3 justify-end">
+                <Button variant="ghost" onClick={() => setShowCreate(false)} type="button">
+                  Cancel
+                </Button>
+                <Button type="submit" variant="primary" loading={creating}>
+                  Publish Post
                 </Button>
               </div>
             </form>
-          </Card>
-        )}
+          )}
 
-        {/* Filters */}
-        <div className="flex gap-4 items-center flex-wrap" style={{ marginBottom: 'var(--space-4)' }}>
-          <div style={{ flex: 1, minWidth: '200px' }}>
-            <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} placeholder="Search posts..." />
-          </div>
-          <div className="flex gap-2 flex-wrap">
+          {/* ── Category Filters ── */}
+          <div className="category-chips" style={{ marginTop: 'var(--space-5)' }}>
             {CATEGORIES.map((cat) => (
               <button
                 key={cat.value}
-                className={`btn btn--sm ${category === cat.value ? 'btn--primary' : 'btn--ghost'}`}
-                onClick={() => { setCategory(cat.value); setPage(1); }}
+                className={`category-chip ${category === cat.value ? 'category-chip--active' : ''}`}
+                onClick={() => {
+                  setCategory(cat.value as ForumCategory | '');
+                  setPage(1);
+                }}
+                aria-pressed={category === cat.value}
               >
                 {cat.label}
               </button>
             ))}
           </div>
-        </div>
 
-        {/* Results */}
-        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 'var(--space-4)' }}>
-          {filtered.length} post{filtered.length !== 1 ? 's' : ''}
-        </p>
+          {/* ── Posts ── */}
+          <div className="flex flex-col gap-4" style={{ marginTop: 'var(--space-5)' }}>
+            {isLoading ? (
+              <LoadingPage message="Loading posts..." />
+            ) : posts.length === 0 ? (
+              <EmptyState
+                icon="💬"
+                title="No Posts Yet"
+                description={
+                  isAuthenticated
+                    ? 'Be the first to start a conversation!'
+                    : 'Sign in to start a conversation.'
+                }
+                action={
+                  isAuthenticated
+                    ? { label: 'Create Post', onClick: () => setShowCreate(true) }
+                    : undefined
+                }
+              />
+            ) : (
+              posts.map((post) => (
+                <PostCard
+                  key={post.id}
+                  post={post}
+                  isLoggedIn={isAuthenticated}
+                  userId={user?.id ?? null}
+                  userRole={user?.role ?? null}
+                  onFlag={handleFlag}
+                  onDelete={handleDelete}
+                />
+              ))
+            )}
+          </div>
 
-        {loading ? (
-          <LoadingPage message="Loading community posts..." />
-        ) : filtered.length === 0 ? (
-          <EmptyState
-            icon="💬"
-            title="No Posts Yet"
-            description={search || category ? 'Try adjusting your filters.' : 'Be the first to start a conversation!'}
-            action={
-              isAuthenticated && !search && !category
-                ? { label: 'Create Post', onClick: () => setShowNewPost(true) }
-                : (search || category)
-                ? { label: 'Clear Filters', onClick: () => { setSearch(''); setCategory(''); } }
-                : undefined
-            }
+          {/* ── Pagination ── */}
+          <Pagination
+            currentPage={page}
+            totalPages={totalPages}
+            onPageChange={setPage}
           />
-        ) : (
-          <>
-            <div className="flex flex-col gap-3">
-              {pageItems.map((post) => (
-                <PostCard key={post.id} post={post} onSelect={setSelectedPost} />
-              ))}
-            </div>
-            <Pagination currentPage={page} totalPages={totalPages} onPageChange={setPage} />
-          </>
-        )}
+        </section>
       </div>
     </div>
   );

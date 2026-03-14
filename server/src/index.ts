@@ -35,11 +35,11 @@ app.use(pinoHttp({
 }));
 app.use(generalLimiter);
 
-// JSON parsing — skip for Stripe webhook (needs raw body)
-app.use((req, res, next) => {
-  if (req.path === '/api/payments/webhook') return next();
-  express.json({ limit: '2mb' })(req, res, next);
-});
+// Stripe webhook needs raw body for signature verification
+app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
+
+// JSON parsing for everything else
+app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false }));
 
 // Health checks

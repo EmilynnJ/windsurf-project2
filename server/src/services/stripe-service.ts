@@ -1,3 +1,9 @@
+// ============================================================
+// Stripe Service — PaymentIntent, webhook, Connect, payouts
+// Currently payments.ts handles routes inline, but this module
+// provides reusable functions for the same operations.
+// ============================================================
+
 import Stripe from 'stripe';
 import { eq, sql } from 'drizzle-orm';
 import { db } from '../db/db';
@@ -6,7 +12,7 @@ import { config } from '../config';
 import { logger } from '../utils/logger';
 import { AppError } from '../middleware/error-handler';
 
-const stripe = new Stripe(config.stripe.secretKey, { apiVersion: '2024-12-18.acacia' as any });
+const stripe = new Stripe(config.stripe.secretKey, { apiVersion: '2024-06-20' as any });
 
 const MIN_TOPUP_CENTS = 500;
 const MIN_PAYOUT_CENTS = 1500;
@@ -21,23 +27,9 @@ export async function createPaymentIntent(
     throw new AppError(400, `Minimum top-up is $${(MIN_TOPUP_CENTS / 100).toFixed(2)}`);
   }
 
-  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-  if (!user) throw new AppError(404, 'User not found');
-
-  let stripeCustomerId = user.stripeCustomerId;
-  if (!stripeCustomerId) {
-    const customer = await stripe.customers.create({
-      email: user.email,
-      metadata: { userId: String(userId), auth0Id: user.auth0Id },
-    });
-    stripeCustomerId = customer.id;
-    await db.update(users).set({ stripeCustomerId: customer.id }).where(eq(users.id, userId));
-  }
-
   const paymentIntent = await stripe.paymentIntents.create({
     amount: amountCents,
     currency: 'usd',
-    customer: stripeCustomerId,
     metadata: { userId: String(userId), type: 'balance_topup' },
     automatic_payment_methods: { enabled: true },
   });
@@ -73,33 +65,31 @@ export async function handleWebhook(rawBody: Buffer, signature: string): Promise
       return;
     }
 
-    // Get current balance before update
-    const [currentUser] = await db
-      .select({ accountBalance: users.accountBalance })
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
+    await db.transaction(async (tx) => {
+      // Credit balance atomically
+      const [updated] = await tx
+        .update(users)
+        .set({
+          balance: sql`${users.balance} + ${amount}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, userId))
+        .returning({ balance: users.balance });
 
-    const balanceBefore = currentUser?.accountBalance ?? 0;
+      if (!updated) {
+        logger.error({ userId }, 'User not found for balance credit');
+        return;
+      }
 
-    // Credit balance atomically
-    await db
-      .update(users)
-      .set({
-        accountBalance: sql`${users.accountBalance} + ${amount}`,
-        totalSpent: sql`${users.totalSpent} + ${amount}`,
-      })
-      .where(eq(users.id, userId));
-
-    // Record transaction with full audit trail
-    await db.insert(transactions).values({
-      userId,
-      type: 'top_up',
-      amount,
-      balanceBefore,
-      balanceAfter: balanceBefore + amount,
-      stripePaymentId: pi.id,
-      description: `Balance top-up: $${(amount / 100).toFixed(2)}`,
+      // Record transaction
+      await tx.insert(transactions).values({
+        userId,
+        type: 'topup',
+        amount,
+        balanceAfter: updated.balance,
+        stripePaymentIntentId: pi.id,
+        note: `Balance top-up: $${(amount / 100).toFixed(2)}`,
+      });
     });
 
     logger.info({ userId, amount, paymentIntentId: pi.id }, 'Balance credited via webhook');
@@ -124,13 +114,13 @@ export async function createConnectAccount(
 
   await db
     .update(users)
-    .set({ stripeAccountId: account.id })
+    .set({ stripeAccountId: account.id, updatedAt: new Date() })
     .where(eq(users.id, userId));
 
   const accountLink = await stripe.accountLinks.create({
     account: account.id,
-    refresh_url: `${config.corsOrigin}/reader/settings?stripe=refresh`,
-    return_url: `${config.corsOrigin}/reader/settings?stripe=complete`,
+    refresh_url: `${config.corsOrigin}/dashboard`,
+    return_url: `${config.corsOrigin}/dashboard`,
     type: 'account_onboarding',
   });
 
@@ -148,18 +138,17 @@ export async function createPayout(
   if (!reader) throw new AppError(404, 'Reader not found');
   if (reader.role !== 'reader') throw new AppError(400, 'User is not a reader');
   if (!reader.stripeAccountId) throw new AppError(400, 'Reader has no Stripe Connect account');
-  if (reader.accountBalance < MIN_PAYOUT_CENTS) {
+  if (reader.balance < MIN_PAYOUT_CENTS) {
     throw new AppError(400, `Minimum payout is $${(MIN_PAYOUT_CENTS / 100).toFixed(2)}`);
   }
 
-  const payoutAmount = reader.accountBalance;
-  const balanceBefore = reader.accountBalance;
+  const payoutAmount = reader.balance;
 
   // Deduct balance atomically — only succeeds if balance hasn't changed
   const result = await db
     .update(users)
-    .set({ accountBalance: 0 })
-    .where(sql`${users.id} = ${readerId} AND ${users.accountBalance} = ${payoutAmount}`)
+    .set({ balance: 0, updatedAt: new Date() })
+    .where(sql`${users.id} = ${readerId} AND ${users.balance} = ${payoutAmount}`)
     .returning({ id: users.id });
 
   if (result.length === 0) throw new AppError(409, 'Balance changed during payout, please retry');
@@ -173,12 +162,11 @@ export async function createPayout(
 
   await db.insert(transactions).values({
     userId: readerId,
-    type: 'payout',
+    type: 'reader_payout',
     amount: -payoutAmount,
-    balanceBefore,
     balanceAfter: 0,
-    stripePaymentId: transfer.id,
-    description: `Payout: $${(payoutAmount / 100).toFixed(2)}`,
+    stripePaymentIntentId: transfer.id,
+    note: `Payout: $${(payoutAmount / 100).toFixed(2)}`,
   });
 
   logger.info({ readerId, amount: payoutAmount, transferId: transfer.id }, 'Payout processed');
@@ -193,28 +181,24 @@ export async function refundReading(
   clientId: number,
   amount: number,
 ): Promise<void> {
-  const [currentUser] = await db
-    .select({ accountBalance: users.accountBalance })
-    .from(users)
-    .where(eq(users.id, clientId))
-    .limit(1);
+  await db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(users)
+      .set({
+        balance: sql`${users.balance} + ${amount}`,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, clientId))
+      .returning({ balance: users.balance });
 
-  const balanceBefore = currentUser?.accountBalance ?? 0;
-
-  // Credit client balance back
-  await db
-    .update(users)
-    .set({ accountBalance: sql`${users.accountBalance} + ${amount}` })
-    .where(eq(users.id, clientId));
-
-  await db.insert(transactions).values({
-    userId: clientId,
-    type: 'refund',
-    amount,
-    balanceBefore,
-    balanceAfter: balanceBefore + amount,
-    readingId,
-    description: `Refund for reading #${readingId}: $${(amount / 100).toFixed(2)}`,
+    await tx.insert(transactions).values({
+      userId: clientId,
+      type: 'refund',
+      amount,
+      balanceAfter: updated?.balance ?? 0,
+      readingId,
+      note: `Refund for reading #${readingId}: $${(amount / 100).toFixed(2)}`,
+    });
   });
 
   logger.info({ readingId, clientId, amount }, 'Reading refunded');

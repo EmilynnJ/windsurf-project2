@@ -10,7 +10,7 @@
 // ============================================================
 
 import { eq, sql } from "drizzle-orm";
-import { getDb } from "../db/db";
+import { db } from "../db/db";
 import { users, readings, transactions } from "../db/schema";
 import { wsService } from "./websocket-service";
 import { logger } from "../utils/logger";
@@ -141,7 +141,7 @@ class BillingService {
     const platformEarned = totalCharged - readerEarned;
 
     try {
-      const db = getDb();
+      // Using imported db instance
       await db.transaction(async (tx) => {
         // Finalize reading record
         await tx
@@ -211,7 +211,7 @@ class BillingService {
     const platformShare = ratePerMinute - readerShare;
 
     try {
-      const db = getDb();
+      // Using imported db instance
       await db.transaction(async (tx) => {
         // Deduct from client — with balance check
         const [updated] = await tx
