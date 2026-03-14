@@ -4,280 +4,334 @@ import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../../components/ToastProvider';
 import { apiService } from '../../services/api';
 import {
-  Button, Card, Stat, Tabs, TabPanel, Table, Badge,
-  LoadingPage, EmptyState,
+  Button,
+  Card,
+  CardBody,
+  Modal,
+  Input,
+  Stat,
+  Table,
+  LoadingPage,
+  EmptyState,
 } from '../../components/ui';
-import type { Column } from '../../components/ui/Table';
+import type { Column } from '../../components/ui';
+import type { Reading, Transaction } from '../../types';
 
-function centsToPrice(c: number): string {
-  return `$${(c / 100).toFixed(2)}`;
+/* ── Constants ──────────────────────────────────────────────── */
+const PRESET_AMOUNTS = [10, 25, 50, 100];
+const MIN_AMOUNT = 5;
+
+/* ── Helpers ────────────────────────────────────────────────── */
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 }
 
-interface Reading {
-  id: number;
-  readerName?: string;
-  type: string;
-  status: string;
-  duration: number;
-  totalCost: number;
-  rating: number | null;
-  createdAt: string;
-  [key: string]: unknown;
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}m ${s}s`;
 }
 
-interface Transaction {
-  id: number;
-  type: string;
-  amount: number;
-  description: string | null;
-  createdAt: string;
-  [key: string]: unknown;
-}
-
-const PRESET_AMOUNTS = [1000, 2500, 5000, 10000]; // $10, $25, $50, $100
-
-const tabList = [
-  { id: 'overview', label: '✨ Overview' },
-  { id: 'readings', label: '📖 Readings' },
-  { id: 'transactions', label: '💰 Transactions' },
-  { id: 'funds', label: '💳 Add Funds' },
+/* ── Reading & Transaction Column Definitions ───────────────── */
+const readingColumns: Column<Reading & Record<string, unknown>>[] = [
+  {
+    key: 'createdAt',
+    header: 'Date',
+    sortable: true,
+    render: (row) => formatDate(row.createdAt as string),
+  },
+  {
+    key: 'type',
+    header: 'Type',
+    render: (row) => {
+      const icons: Record<string, string> = { chat: '💬', voice: '🎙️', video: '📹' };
+      return `${icons[row.type as string] || ''} ${(row.type as string).charAt(0).toUpperCase() + (row.type as string).slice(1)}`;
+    },
+  },
+  {
+    key: 'status',
+    header: 'Status',
+    render: (row) => (
+      <span className={`badge badge--${row.status === 'completed' ? 'gold' : row.status === 'in_progress' ? 'online' : 'info'}`}>
+        {(row.status as string).replace('_', ' ')}
+      </span>
+    ),
+  },
+  {
+    key: 'duration',
+    header: 'Duration',
+    render: (row) => formatDuration(row.duration as number),
+  },
+  {
+    key: 'totalCost',
+    header: 'Cost',
+    sortable: true,
+    render: (row) => <span className="price">${(row.totalCost as number).toFixed(2)}</span>,
+  },
 ];
 
-export function ClientDashboard() {
-  const { user } = useAuth();
-  const navigate = useNavigate();
-  const { addToast } = useToast();
+const transactionColumns: Column<Transaction & Record<string, unknown>>[] = [
+  {
+    key: 'createdAt',
+    header: 'Date',
+    sortable: true,
+    render: (row) => formatDate(row.createdAt as string),
+  },
+  {
+    key: 'type',
+    header: 'Type',
+    render: (row) => {
+      const labels: Record<string, string> = {
+        top_up: '💰 Top Up',
+        reading_charge: '🔮 Reading',
+        refund: '↩️ Refund',
+        admin_adjustment: '⚙️ Adjustment',
+      };
+      return labels[row.type as string] || row.type;
+    },
+  },
+  {
+    key: 'amount',
+    header: 'Amount',
+    sortable: true,
+    render: (row) => {
+      const amt = row.amount as number;
+      const isPositive = amt >= 0;
+      return (
+        <span className={isPositive ? 'price price--positive' : 'price price--negative'}>
+          {isPositive ? '+' : ''}${amt.toFixed(2)}
+        </span>
+      );
+    },
+  },
+  {
+    key: 'description',
+    header: 'Description',
+    render: (row) => (row.description as string) || '—',
+  },
+];
 
-  const [activeTab, setActiveTab] = useState('overview');
-  const [balance, setBalance] = useState(user?.accountBalance ?? 0);
+/* ── Client Dashboard ───────────────────────────────────────── */
+export function ClientDashboard() {
+  const { user, refreshUser } = useAuth();
+  const { addToast } = useToast();
+  const navigate = useNavigate();
+
   const [readings, setReadings] = useState<Reading[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingData, setLoadingData] = useState(true);
 
-  // Add funds state
-  const [selectedAmount, setSelectedAmount] = useState(2500);
+  // Add Funds Modal
+  const [showAddFunds, setShowAddFunds] = useState(false);
+  const [selectedAmount, setSelectedAmount] = useState<number | null>(25);
   const [customAmount, setCustomAmount] = useState('');
-  const [processing, setProcessing] = useState(false);
+  const [addingFunds, setAddingFunds] = useState(false);
 
-  const fetchData = useCallback(async () => {
-    try {
-      const [balData, readData, txData] = await Promise.all([
-        apiService.get('/api/payments/balance') as Promise<{ balance: number }>,
-        apiService.get('/api/readings/client').catch(() => []),
-        apiService.get('/api/transactions/me').catch(() => []),
-      ]);
-      setBalance(balData.balance);
-      setReadings(readData as Reading[]);
-      setTransactions(txData as Transaction[]);
-    } catch {
-      // Silently handle — individual endpoints may not be ready
-    } finally {
-      setLoading(false);
+  /* ── Load data ── */
+  useEffect(() => {
+    async function load() {
+      try {
+        const [readingData, txData] = await Promise.all([
+          apiService.get<Reading[]>('/api/readings/my'),
+          apiService.get<Transaction[]>('/api/transactions/my'),
+        ]);
+        setReadings(readingData);
+        setTransactions(txData);
+      } catch {
+        addToast('error', 'Failed to load dashboard data');
+      } finally {
+        setLoadingData(false);
+      }
     }
-  }, []);
+    load();
+  }, [addToast]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
-
-  const handleAddFunds = async () => {
-    const amount = customAmount ? Math.round(parseFloat(customAmount) * 100) : selectedAmount;
-    if (amount < 500) {
-      addToast('error', 'Minimum top-up is $5.00');
+  /* ── Add Funds ── */
+  const handleAddFunds = useCallback(async () => {
+    const amount = selectedAmount || parseFloat(customAmount);
+    if (!amount || amount < MIN_AMOUNT) {
+      addToast('error', `Minimum deposit is $${MIN_AMOUNT}.00`);
       return;
     }
-    setProcessing(true);
+
+    setAddingFunds(true);
     try {
-      const data = await apiService.post<{ clientSecret: string }>('/api/payments/create-intent', { amount });
-      // The Stripe PaymentElement is mounted with data.clientSecret
-      // After successful payment, the webhook credits the balance
-      addToast('info', `Stripe checkout ready (secret: ${data.clientSecret.slice(0, 8)}…)`);
-      // TODO: Mount Stripe Elements PaymentElement with clientSecret
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Payment failed';
-      addToast('error', msg);
+      await apiService.post('/api/transactions/top-up', { amount });
+      addToast('success', `$${amount.toFixed(2)} added to your balance! ✨`);
+      setShowAddFunds(false);
+      setSelectedAmount(25);
+      setCustomAmount('');
+      if (refreshUser) refreshUser();
+      // Refresh transactions
+      const txData = await apiService.get<Transaction[]>('/api/transactions/my');
+      setTransactions(txData);
+    } catch {
+      addToast('error', 'Failed to add funds. Please try again.');
     } finally {
-      setProcessing(false);
+      setAddingFunds(false);
     }
-  };
+  }, [selectedAmount, customAmount, addToast, refreshUser]);
 
-  const readingColumns: Column<Reading>[] = [
-    { key: 'id', header: 'ID', width: '60px', sortable: true },
-    {
-      key: 'readerName', header: 'Reader', sortable: true,
-      render: (r) => <strong>{r.readerName || 'Reader'}</strong>,
-    },
-    {
-      key: 'type', header: 'Type',
-      render: (r) => <Badge variant="pink">{r.type === 'chat' ? '💬' : r.type === 'voice' ? '🎤' : '📹'} {r.type}</Badge>,
-    },
-    {
-      key: 'status', header: 'Status',
-      render: (r) => (
-        <Badge variant={r.status === 'completed' ? 'online' : r.status === 'in_progress' ? 'info' : 'gold'}>
-          {r.status}
-        </Badge>
-      ),
-    },
-    { key: 'duration', header: 'Duration', render: (r) => r.duration > 0 ? `${r.duration} min` : '—' },
-    { key: 'totalCost', header: 'Cost', sortable: true, render: (r) => <span className="price price--sm">{centsToPrice(r.totalCost)}</span> },
-    {
-      key: 'createdAt', header: 'Date', sortable: true,
-      render: (r) => new Date(r.createdAt).toLocaleDateString(),
-    },
-  ];
+  if (!user) return <LoadingPage message="Loading dashboard..." />;
 
-  const txColumns: Column<Transaction>[] = [
-    {
-      key: 'type', header: 'Type',
-      render: (t) => (
-        <Badge variant={t.type === 'top_up' ? 'online' : t.type === 'reading_charge' ? 'pink' : 'gold'}>
-          {t.type.replace(/_/g, ' ')}
-        </Badge>
-      ),
-    },
-    {
-      key: 'amount', header: 'Amount', sortable: true,
-      render: (t) => (
-        <span className={`price price--sm ${t.amount >= 0 ? 'price--positive' : 'price--negative'}`}>
-          {t.amount >= 0 ? '+' : ''}{centsToPrice(Math.abs(t.amount))}
-        </span>
-      ),
-    },
-    { key: 'description', header: 'Description', render: (t) => t.description || '—' },
-    {
-      key: 'createdAt', header: 'Date', sortable: true,
-      render: (t) => new Date(t.createdAt).toLocaleDateString(),
-    },
-  ];
-
-  if (loading) return <LoadingPage message="Loading your dashboard..." />;
-
-  const totalSpent = readings.reduce((s, r) => s + (r.totalCost || 0), 0);
-  const completedCount = readings.filter((r) => r.status === 'completed').length;
+  const activeReadings = readings.filter((r) => r.status === 'in_progress' || r.status === 'pending');
+  const completedReadings = readings.filter((r) => r.status === 'completed');
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* Stats row */}
-      <div className="grid grid--4">
-        <Stat label="Balance" value={centsToPrice(balance)} icon="💰" />
-        <Stat label="Total Spent" value={centsToPrice(totalSpent)} icon="📊" />
-        <Stat label="Readings" value={completedCount} icon="📖" />
-        <Stat
-          label="Active"
-          value={readings.filter((r) => r.status === 'in_progress').length}
-          icon="⚡"
-        />
-      </div>
+    <div className="page-enter">
+      <div className="container">
+        <section className="section section--hero">
+          <h1 className="heading-2">Welcome back, {user.displayName || user.fullName || 'Seeker'}</h1>
+          <div className="divider" />
+        </section>
 
-      {/* Quick action */}
-      {balance < 500 && (
-        <Card variant="glow-gold" className="flex items-center justify-between">
-          <div>
-            <strong style={{ color: 'var(--accent-gold)' }}>Low Balance</strong>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-              Add funds to start a reading (minimum $5.00 required)
-            </p>
+        {/* ── Balance + Stats ────────────────────────── */}
+        <div className="grid grid--stats">
+          <Card variant="glow-gold">
+            <CardBody>
+              <div className="balance-display">
+                <span className="balance-display__label">Account Balance</span>
+                <span className="balance-display__amount">
+                  ${user.accountBalance.toFixed(2)}
+                </span>
+                <Button variant="gold" onClick={() => setShowAddFunds(true)}>
+                  + Add Funds
+                </Button>
+              </div>
+            </CardBody>
+          </Card>
+          <div className="flex flex-col gap-4">
+            <Stat label="Total Readings" value={readings.length} />
+            <Stat label="Active Sessions" value={activeReadings.length} />
           </div>
-          <Button variant="gold" onClick={() => setActiveTab('funds')}>
-            Add Funds
-          </Button>
-        </Card>
-      )}
+        </div>
 
-      <Tabs tabs={tabList} activeTab={activeTab} onChange={setActiveTab} />
+        {/* ── Active Sessions ────────────────────────── */}
+        {activeReadings.length > 0 && (
+          <section className="section">
+            <h2 className="heading-3">Active Sessions</h2>
+            <div className="flex flex-col gap-3">
+              {activeReadings.map((reading) => (
+                <Card key={reading.id} variant="glow-pink" padding="sm">
+                  <CardBody>
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <span className="badge badge--online">In Progress</span>
+                        <p className="caption">
+                          {reading.type.charAt(0).toUpperCase() + reading.type.slice(1)} reading · ${reading.ratePerMinute.toFixed(2)}/min
+                        </p>
+                      </div>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => navigate(`/reading/${reading.id}`)}
+                      >
+                        Rejoin
+                      </Button>
+                    </div>
+                  </CardBody>
+                </Card>
+              ))}
+            </div>
+          </section>
+        )}
 
-      {/* Overview */}
-      <TabPanel id="overview" activeTab={activeTab}>
-        <div className="flex flex-col gap-4">
-          <h3>Recent Readings</h3>
-          {readings.length === 0 ? (
+        {/* ── Reading History ────────────────────────── */}
+        <section className="section">
+          <h2 className="heading-3">Reading History</h2>
+          {loadingData ? (
+            <LoadingPage message="Loading readings..." />
+          ) : completedReadings.length === 0 ? (
             <EmptyState
               icon="🔮"
               title="No Readings Yet"
-              description="Browse our readers to start your spiritual journey."
-              action={{ label: 'Find a Reader', onClick: () => navigate('/readers') }}
+              description="Start your first reading to see your history here."
+              action={{ label: 'Browse Readers', onClick: () => navigate('/readers') }}
             />
           ) : (
             <Table
               columns={readingColumns}
-              data={readings.slice(0, 5)}
-              keyExtractor={(r) => r.id}
-              emptyMessage="No readings yet"
+              data={completedReadings as (Reading & Record<string, unknown>)[]}
+              keyExtractor={(row) => (row as Reading).id}
             />
           )}
-        </div>
-      </TabPanel>
+        </section>
 
-      {/* Readings history */}
-      <TabPanel id="readings" activeTab={activeTab}>
-        <Table
-          columns={readingColumns}
-          data={readings}
-          keyExtractor={(r) => r.id}
-          emptyMessage="No readings yet — browse our readers to get started"
-        />
-      </TabPanel>
+        {/* ── Transaction History ────────────────────── */}
+        <section className="section">
+          <h2 className="heading-3">Transaction History</h2>
+          {loadingData ? (
+            <LoadingPage message="Loading transactions..." />
+          ) : transactions.length === 0 ? (
+            <EmptyState
+              icon="💰"
+              title="No Transactions"
+              description="Your account activity will appear here."
+            />
+          ) : (
+            <Table
+              columns={transactionColumns}
+              data={transactions as (Transaction & Record<string, unknown>)[]}
+              keyExtractor={(row) => (row as Transaction).id}
+            />
+          )}
+        </section>
 
-      {/* Transactions */}
-      <TabPanel id="transactions" activeTab={activeTab}>
-        <Table
-          columns={txColumns}
-          data={transactions}
-          keyExtractor={(t) => t.id}
-          emptyMessage="No transactions yet"
-        />
-      </TabPanel>
-
-      {/* Add Funds */}
-      <TabPanel id="funds" activeTab={activeTab}>
-        <Card variant="static" style={{ maxWidth: '500px' }}>
-          <h3 style={{ marginBottom: 'var(--space-5)' }}>Add Funds to Your Account</h3>
-
-          <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginBottom: 'var(--space-5)' }}>
-            Current balance: <strong className="price">{centsToPrice(balance)}</strong>
-          </p>
-
-          {/* Preset amounts */}
-          <div className="grid grid--4" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-5)' }}>
-            {PRESET_AMOUNTS.map((amount) => (
-              <button
-                key={amount}
-                className={`btn ${selectedAmount === amount && !customAmount ? 'btn--primary' : 'btn--secondary'}`}
-                onClick={() => { setSelectedAmount(amount); setCustomAmount(''); }}
+        {/* ── Add Funds Modal ────────────────────────── */}
+        <Modal
+          open={showAddFunds}
+          onClose={() => setShowAddFunds(false)}
+          title="Add Funds"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setShowAddFunds(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="gold"
+                onClick={handleAddFunds}
+                loading={addingFunds}
               >
-                {centsToPrice(amount)}
-              </button>
-            ))}
-          </div>
-
-          {/* Custom amount */}
-          <div className="form-group" style={{ marginBottom: 'var(--space-5)' }}>
-            <label className="form-label">Custom Amount</label>
-            <div className="flex gap-2 items-center">
-              <span style={{ color: 'var(--text-muted)', fontSize: '1.1rem' }}>$</span>
-              <input
-                type="number"
-                className="form-input"
-                placeholder="Enter amount"
-                min="5"
-                step="0.01"
-                value={customAmount}
-                onChange={(e) => setCustomAmount(e.target.value)}
-              />
+                Add ${(selectedAmount || parseFloat(customAmount) || 0).toFixed(2)}
+              </Button>
+            </>
+          }
+        >
+          <div className="flex flex-col gap-5">
+            <p className="body-text">Select an amount or enter a custom value:</p>
+            <div className="amount-presets">
+              {PRESET_AMOUNTS.map((amt) => (
+                <button
+                  key={amt}
+                  className={`amount-preset ${selectedAmount === amt ? 'amount-preset--selected' : ''}`}
+                  onClick={() => {
+                    setSelectedAmount(amt);
+                    setCustomAmount('');
+                  }}
+                  aria-pressed={selectedAmount === amt}
+                >
+                  ${amt}
+                </button>
+              ))}
             </div>
-            <span className="form-help">Minimum $5.00</span>
+            <Input
+              label="Custom Amount"
+              type="number"
+              placeholder="Enter amount..."
+              value={customAmount}
+              onChange={(e) => {
+                setCustomAmount(e.target.value);
+                setSelectedAmount(null);
+              }}
+              help={`Minimum $${MIN_AMOUNT}.00`}
+            />
           </div>
-
-          <Button
-            variant="gold"
-            fullWidth
-            size="lg"
-            onClick={handleAddFunds}
-            loading={processing}
-          >
-            Add {centsToPrice(customAmount ? Math.round(parseFloat(customAmount || '0') * 100) : selectedAmount)} to Balance
-          </Button>
-        </Card>
-      </TabPanel>
+        </Modal>
+      </div>
     </div>
   );
 }

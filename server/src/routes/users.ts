@@ -1,149 +1,225 @@
-import { Router } from 'express';
-import { z } from 'zod';
-import { eq, and, desc } from 'drizzle-orm';
-import { db } from '../db/db';
-import { users, readings, transactions } from '../db/schema';
-import { checkJwt } from '../middleware/auth';
-import { resolveUser, requireRole } from '../middleware/rbac';
-import { validate } from '../middleware/validate';
-import { AppError } from '../middleware/error-handler';
-import { logger } from '../utils/logger';
+// ============================================================
+// User & Reader Routes — Public reader profiles, user profile
+// ============================================================
+
+import { Router } from "express";
+import { eq, and, desc } from "drizzle-orm";
+
+import { getDb } from "../db/db";
+import { users, readings } from "../db/schema";
+import { checkJwt } from "../middleware/auth";
+import { logger } from "../utils/logger";
 
 const router = Router();
 
-// GET /api/readers — list all readers (Public)
-router.get('/readers', async (_req, res, next) => {
+// ── GET /api/users/readers — Public reader list (for browse page) ───────
+router.get("/readers", async (_req, res, next) => {
   try {
-    const allReaders = await db
+    const db = getDb();
+    const result = await db
       .select({
         id: users.id,
-        fullName: users.fullName,
         username: users.username,
-        avatarUrl: users.avatarUrl,
+        fullName: users.fullName,
         bio: users.bio,
         specialties: users.specialties,
+        profileImage: users.profileImage,
+        pricingChat: users.pricingChat,
+        pricingVoice: users.pricingVoice,
+        pricingVideo: users.pricingVideo,
         isOnline: users.isOnline,
-        pricingChat: users.pricingChat,
-        pricingVoice: users.pricingVoice,
-        pricingVideo: users.pricingVideo,
+        totalReadings: users.totalReadings,
       })
       .from(users)
-      .where(eq(users.role, 'reader'));
-    res.json(allReaders);
-  } catch (err) { next(err); }
+      .where(eq(users.role, "reader"))
+      .orderBy(desc(users.isOnline));
+
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
 });
 
-// GET /api/readers/online — list online readers (Public)
-router.get('/readers/online', async (_req, res, next) => {
+// ── GET /api/users/readers/:id — Single reader public profile ───────────
+router.get("/readers/:id", async (req, res, next) => {
   try {
-    const online = await db
-      .select({
-        id: users.id,
-        fullName: users.fullName,
-        username: users.username,
-        avatarUrl: users.avatarUrl,
-        bio: users.bio,
-        specialties: users.specialties,
-        pricingChat: users.pricingChat,
-        pricingVoice: users.pricingVoice,
-        pricingVideo: users.pricingVideo,
-      })
-      .from(users)
-      .where(and(eq(users.role, 'reader'), eq(users.isOnline, true)));
-    res.json(online);
-  } catch (err) { next(err); }
-});
-
-// GET /api/readers/:id — reader profile with reviews (Public)
-router.get('/readers/:id', async (req, res, next) => {
-  try {
+    const db = getDb();
     const readerId = parseInt(req.params.id!, 10);
-    if (isNaN(readerId)) throw new AppError(400, 'Invalid reader ID');
+    if (isNaN(readerId)) {
+      res.status(400).json({ error: "Invalid reader ID" });
+      return;
+    }
 
     const [reader] = await db
-      .select()
+      .select({
+        id: users.id,
+        username: users.username,
+        fullName: users.fullName,
+        bio: users.bio,
+        specialties: users.specialties,
+        profileImage: users.profileImage,
+        pricingChat: users.pricingChat,
+        pricingVoice: users.pricingVoice,
+        pricingVideo: users.pricingVideo,
+        isOnline: users.isOnline,
+        totalReadings: users.totalReadings,
+        createdAt: users.createdAt,
+      })
       .from(users)
-      .where(and(eq(users.id, readerId), eq(users.role, 'reader')))
-      .limit(1);
-    if (!reader) throw new AppError(404, 'Reader not found');
+      .where(and(eq(users.id, readerId), eq(users.role, "reader")));
 
-    const recentReviews = await db
+    if (!reader) {
+      res.status(404).json({ error: "Reader not found" });
+      return;
+    }
+
+    // Get reviews for this reader
+    const readerReviews = await db
       .select({
         id: readings.id,
         rating: readings.rating,
         review: readings.review,
-        createdAt: readings.createdAt,
-        clientId: readings.clientId,
+        completedAt: readings.completedAt,
+        clientName: users.fullName,
+        clientUsername: users.username,
       })
       .from(readings)
-      .where(and(eq(readings.readerId, readerId), eq(readings.status, 'completed')))
-      .orderBy(desc(readings.createdAt))
+      .innerJoin(users, eq(readings.clientId, users.id))
+      .where(
+        and(
+          eq(readings.readerId, readerId),
+          eq(readings.status, "completed"),
+        ),
+      )
+      .orderBy(desc(readings.completedAt))
       .limit(20);
 
-    // Strip sensitive fields from public profile
-    const { auth0Id, stripeAccountId, stripeCustomerId, accountBalance, totalEarnings, totalSpent, ...publicProfile } = reader;
-    res.json({ ...publicProfile, reviews: recentReviews.filter((r) => r.rating !== null) });
-  } catch (err) { next(err); }
+    // Calculate average rating
+    const ratedReviews = readerReviews.filter((r) => r.rating != null);
+    const avgRating =
+      ratedReviews.length > 0
+        ? ratedReviews.reduce((sum, r) => sum + r.rating!, 0) / ratedReviews.length
+        : 0;
+
+    res.json({
+      ...reader,
+      avgRating: Math.round(avgRating * 10) / 10,
+      reviewCount: ratedReviews.length,
+      reviews: readerReviews.filter((r) => r.rating != null),
+    });
+  } catch (err) {
+    next(err);
+  }
 });
 
-// Reader-only routes
-const statusSchema = z.object({ isOnline: z.boolean() });
-const pricingSchema = z.object({
-  pricingChat: z.number().int().min(0).optional(),
-  pricingVoice: z.number().int().min(0).optional(),
-  pricingVideo: z.number().int().min(0).optional(),
-});
-
-// PUT /api/readers/:id/status
-router.put('/readers/:id/status', checkJwt, resolveUser, requireRole('reader'), validate(statusSchema),
-  async (req, res, next) => {
-    try {
-      const readerId = parseInt(req.params.id!, 10);
-      if (readerId !== req.user!.id) throw new AppError(403, 'Can only update your own status');
-      const { isOnline } = req.body as z.infer<typeof statusSchema>;
-      const [updated] = await db.update(users).set({ isOnline }).where(eq(users.id, readerId)).returning();
-      res.json({ id: updated!.id, isOnline: updated!.isOnline });
-    } catch (err) { next(err); }
-  },
-);
-
-// PUT /api/readers/:id/pricing
-router.put('/readers/:id/pricing', checkJwt, resolveUser, requireRole('reader'), validate(pricingSchema),
-  async (req, res, next) => {
-    try {
-      const readerId = parseInt(req.params.id!, 10);
-      if (readerId !== req.user!.id) throw new AppError(403, 'Can only update your own pricing');
-      const pricing = req.body as z.infer<typeof pricingSchema>;
-      const updates: Record<string, number> = {};
-      if (pricing.pricingChat !== undefined) updates.pricingChat = pricing.pricingChat;
-      if (pricing.pricingVoice !== undefined) updates.pricingVoice = pricing.pricingVoice;
-      if (pricing.pricingVideo !== undefined) updates.pricingVideo = pricing.pricingVideo;
-      if (Object.keys(updates).length === 0) throw new AppError(400, 'No pricing fields provided');
-      const [updated] = await db.update(users).set(updates).where(eq(users.id, readerId)).returning();
-      res.json({ id: updated!.id, pricingChat: updated!.pricingChat, pricingVoice: updated!.pricingVoice, pricingVideo: updated!.pricingVideo });
-    } catch (err) { next(err); }
-  },
-);
-
-// GET /api/users/:id/readings
-router.get('/users/:id/readings', checkJwt, resolveUser, async (req, res, next) => {
+// ── GET /api/users/me — Authenticated user profile ──────────────────────
+router.get("/me", checkJwt, async (req, res, next) => {
   try {
-    const userId = parseInt(req.params.id!, 10);
-    if (userId !== req.user!.id && req.user!.role !== 'admin') throw new AppError(403, 'Can only view your own reading history');
-    const col = req.user!.role === 'reader' ? readings.readerId : readings.clientId;
-    const history = await db.select().from(readings).where(eq(col, userId)).orderBy(desc(readings.createdAt)).limit(50);
-    res.json(history);
-  } catch (err) { next(err); }
+    if (!req.user) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+    // Strip sensitive fields
+    const { auth0Id, stripeAccountId, ...safeProfile } = req.user;
+    res.json(safeProfile);
+  } catch (err) {
+    next(err);
+  }
 });
 
-// GET /api/users/:id/transactions
-router.get('/users/:id/transactions', checkJwt, resolveUser, async (req, res, next) => {
+// ── PATCH /api/users/me — Update current user profile ───────────────────
+router.patch("/me", checkJwt, async (req, res, next) => {
   try {
-    const userId = parseInt(req.params.id!, 10);
-    if (userId !== req.user!.id && req.user!.role !== 'admin') throw new AppError(403, 'Can only view your own transactions');
-    const txns = await db.select().from(transactions).where(eq(transactions.userId, userId)).orderBy(desc(transactions.createdAt)).limit(50);
-    res.json(txns);
-  } catch (err) { next(err); }
+    const db = getDb();
+    const userId = req.user!.id;
+    const allowedFields = ["fullName", "username", "bio", "profileImage"];
+    const updates: Record<string, any> = {};
+
+    for (const field of allowedFields) {
+      if (req.body[field] !== undefined) {
+        updates[field] = req.body[field];
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      res.status(400).json({ error: "No valid fields to update" });
+      return;
+    }
+
+    updates.updatedAt = new Date();
+
+    const [updated] = await db
+      .update(users)
+      .set(updates)
+      .where(eq(users.id, userId))
+      .returning();
+
+    const { auth0Id, stripeAccountId, ...safeProfile } = updated!;
+    res.json(safeProfile);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── PATCH /api/users/me/online — Toggle reader online status ────────────
+router.patch("/me/online", checkJwt, async (req, res, next) => {
+  try {
+    const db = getDb();
+    const userId = req.user!.id;
+    if (req.user!.role !== "reader") {
+      res.status(403).json({ error: "Only readers can toggle online status" });
+      return;
+    }
+
+    const isOnline = req.body.isOnline === true;
+    const [updated] = await db
+      .update(users)
+      .set({ isOnline, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning({ isOnline: users.isOnline });
+
+    res.json({ isOnline: updated!.isOnline });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── PATCH /api/users/me/pricing — Update reader pricing ────────────────
+router.patch("/me/pricing", checkJwt, async (req, res, next) => {
+  try {
+    const db = getDb();
+    const userId = req.user!.id;
+    if (req.user!.role !== "reader") {
+      res.status(403).json({ error: "Only readers can update pricing" });
+      return;
+    }
+
+    const updates: Record<string, any> = {};
+    if (typeof req.body.pricingChat === "number") updates.pricingChat = Math.max(0, req.body.pricingChat);
+    if (typeof req.body.pricingVoice === "number") updates.pricingVoice = Math.max(0, req.body.pricingVoice);
+    if (typeof req.body.pricingVideo === "number") updates.pricingVideo = Math.max(0, req.body.pricingVideo);
+
+    if (Object.keys(updates).length === 0) {
+      res.status(400).json({ error: "No pricing fields provided" });
+      return;
+    }
+
+    updates.updatedAt = new Date();
+
+    const [updated] = await db
+      .update(users)
+      .set(updates)
+      .where(eq(users.id, userId))
+      .returning();
+
+    res.json({
+      pricingChat: updated!.pricingChat,
+      pricingVoice: updated!.pricingVoice,
+      pricingVideo: updated!.pricingVideo,
+    });
+  } catch (err) {
+    next(err);
+  }
 });
 
 export default router;

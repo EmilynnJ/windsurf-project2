@@ -1,274 +1,256 @@
 import { useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../hooks/useAuth';
 import { useReaders } from '../hooks/useReaders';
 import { useToast } from '../components/ToastProvider';
-import { apiService } from '../services/api';
 import {
-  Button, Card, Avatar, Badge, StatusBadge,
-  SkeletonCard, EmptyState, Input,
+  Button,
+  Avatar,
+  Badge,
+  StatusBadge,
+  SkeletonCard,
 } from '../components/ui';
-import type { ReaderPublic, ReadingType } from '../types';
+import type { ReaderPublic } from '../types';
 
-/* ─── Helpers ─────────────────────────────────────────────────── */
-
-function centsToPrice(cents: number): string {
-  return `$${(cents / 100).toFixed(2)}`;
-}
-
-/* ─── Reader Card ─────────────────────────────────────────────── */
-
+/* ── Reader Card ────────────────────────────────────────────── */
 function ReaderCard({ reader }: { reader: ReaderPublic }) {
-  const { isAuthenticated } = useAuth();
   const navigate = useNavigate();
-
+  const name = reader.fullName || reader.username || 'Reader';
   const specialties = reader.specialties
     ? reader.specialties.split(',').map((s) => s.trim()).filter(Boolean)
     : [];
 
-  const types: { type: ReadingType; icon: string; label: string; price: number }[] = [];
-  if (reader.pricingChat > 0) types.push({ type: 'chat', icon: '💬', label: 'Chat', price: reader.pricingChat });
-  if (reader.pricingVoice > 0) types.push({ type: 'voice', icon: '🎤', label: 'Voice', price: reader.pricingVoice });
-  if (reader.pricingVideo > 0) types.push({ type: 'video', icon: '📹', label: 'Video', price: reader.pricingVideo });
-
-  const handleClick = () => {
-    if (!isAuthenticated) {
-      navigate('/login');
-      return;
-    }
-    navigate(`/readers/${reader.id}`);
-  };
-
   return (
-    <Card className="flex flex-col gap-4">
-      {/* Header row */}
-      <div className="flex items-center gap-3">
-        <Avatar
-          src={reader.profileImage}
-          name={reader.fullName || reader.username}
-          size="lg"
-          online={reader.isOnline}
-        />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="flex items-center gap-2 flex-wrap">
-            <h4 style={{ margin: 0 }}>
-              {reader.fullName || reader.username || 'Reader'}
-            </h4>
-            <StatusBadge online={reader.isOnline} />
-          </div>
-          {specialties.length > 0 && (
-            <div className="flex gap-1 flex-wrap" style={{ marginTop: '6px' }}>
-              {specialties.slice(0, 3).map((s) => (
-                <Badge key={s} variant="gold" size="sm">{s}</Badge>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Pricing */}
-      {types.length > 0 && (
-        <div className="flex gap-4 flex-wrap">
-          {types.map(({ type, icon, label, price }) => (
-            <div key={type} className="flex items-center gap-1" style={{ fontSize: '0.85rem' }}>
-              <span>{icon}</span>
-              <span style={{ color: 'var(--text-muted)' }}>{label}:</span>
-              <span className="price price--sm">{centsToPrice(price)}/min</span>
-            </div>
+    <div
+      className="card card--interactive reader-card"
+      onClick={() => navigate(`/readers/${reader.id}`)}
+      role="link"
+      tabIndex={0}
+      aria-label={`View ${name}'s profile`}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          navigate(`/readers/${reader.id}`);
+        }
+      }}
+    >
+      <Avatar
+        src={reader.profileImage || reader.avatar}
+        name={name}
+        size="xl"
+        online={reader.isOnline}
+      />
+      <h3 className="reader-card__name">{name}</h3>
+      <StatusBadge online={reader.isOnline} />
+      {specialties.length > 0 && (
+        <div className="reader-card__specialties">
+          {specialties.slice(0, 3).map((s) => (
+            <Badge key={s} variant="gold" size="sm">{s}</Badge>
           ))}
         </div>
       )}
-
-      {/* Reading type badges */}
-      <div className="flex gap-2 flex-wrap">
-        {types.map(({ type, icon, label }) => (
-          <Badge key={type} variant="pink">{icon} {label}</Badge>
-        ))}
+      <div className="reader-card__rates">
+        {reader.pricingChat > 0 && (
+          <span className="reader-card__rate">
+            💬 <span className="reader-card__rate-value">${reader.pricingChat.toFixed(2)}</span>/min
+          </span>
+        )}
+        {reader.pricingVoice > 0 && (
+          <span className="reader-card__rate">
+            🎙️ <span className="reader-card__rate-value">${reader.pricingVoice.toFixed(2)}</span>/min
+          </span>
+        )}
+        {reader.pricingVideo > 0 && (
+          <span className="reader-card__rate">
+            📹 <span className="reader-card__rate-value">${reader.pricingVideo.toFixed(2)}</span>/min
+          </span>
+        )}
       </div>
-
-      {/* CTA */}
-      <Button
-        variant="primary"
-        fullWidth
-        onClick={handleClick}
-        style={{ marginTop: 'auto' }}
+      <Link
+        to={`/readers/${reader.id}`}
+        onClick={(e) => e.stopPropagation()}
+        aria-label={`Start reading with ${name}`}
       >
-        {reader.isOnline ? '✨ Start Reading' : 'View Profile'}
-      </Button>
-    </Card>
+        <Button variant="primary" size="sm" className="btn--glow">
+          Start Reading
+        </Button>
+      </Link>
+    </div>
   );
 }
 
-/* ─── Home Page ───────────────────────────────────────────────── */
-
+/* ── Home Page ──────────────────────────────────────────────── */
 export function HomePage() {
-  const { readers, isLoading, error } = useReaders({ onlineOnly: true, pollInterval: 30000 });
-  const [email, setEmail] = useState('');
-  const [subscribing, setSubscribing] = useState(false);
-  const [subscribed, setSubscribed] = useState(false);
+  const { readers, isLoading } = useReaders({ onlineOnly: true, pollInterval: 30000 });
   const { addToast } = useToast();
+  const [email, setEmail] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const handleNewsletter = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!email.trim()) return;
-      setSubscribing(true);
+      if (!email.trim() || !email.includes('@')) {
+        addToast('error', 'Please enter a valid email address.');
+        return;
+      }
+      setSubmitting(true);
       try {
-        await apiService.post('/api/newsletter/subscribe', { email: email.trim() });
-        setSubscribed(true);
-        addToast('success', 'Thanks for subscribing! ✨');
+        // Simulated newsletter signup
+        await new Promise((r) => setTimeout(r, 800));
+        addToast('success', 'Welcome to the SoulSeer community! ✨');
         setEmail('');
       } catch {
-        // Fallback if endpoint not ready yet — still show success for UX
-        setSubscribed(true);
-        addToast('success', 'Thanks for subscribing! ✨');
-        setEmail('');
+        addToast('error', 'Something went wrong. Please try again.');
       } finally {
-        setSubscribing(false);
+        setSubmitting(false);
       }
     },
     [email, addToast]
   );
 
   return (
-    <div className="page-wrapper page-enter">
-      {/* ─── Hero ──────────────────────────────────────────── */}
-      <section className="hero">
-        <h1 className="hero__title">SoulSeer</h1>
-
-        <div className="hero__image">
-          <img
-            src="https://i.postimg.cc/tRLSgCPb/HERO-IMAGE-1.jpg"
-            alt="SoulSeer — spiritual guidance and psychic readings"
-            loading="eager"
-          />
+    <div className="page-enter">
+      {/* ── Hero Section ─────────────────────────────── */}
+      <section className="section section--hero section--cosmic">
+        <div className="container">
+          <h1 className="heading-1 hero__title">SoulSeer</h1>
+          <div className="hero__image">
+            <img
+              src="https://i.postimg.cc/tRLSgCPb/HERO-IMAGE-1.jpg"
+              alt="SoulSeer — mystical cosmic imagery representing spiritual connection"
+              loading="eager"
+            />
+          </div>
+          <p className="hero__tagline">A Community of Gifted Psychics</p>
+          <div className="divider" />
         </div>
-
-        <p className="hero__tagline">A Community of Gifted Psychics</p>
       </section>
 
-      {/* ─── Online Readers ────────────────────────────────── */}
-      <section className="section">
+      {/* ── Online Readers ───────────────────────────── */}
+      <section className="section section--cosmic">
         <div className="container">
-          <h2 className="text-center" style={{ marginBottom: 'var(--space-8)' }}>
-            Readers Online Now
-          </h2>
+          <div className="section-title">
+            <h2 className="section-title__text">Readers Online Now</h2>
+            <p className="section-title__sub">
+              Connect instantly with a gifted psychic
+            </p>
+            <div className="section-title__divider" />
+          </div>
 
           {isLoading ? (
             <div className="grid grid--readers">
-              {Array.from({ length: 3 }).map((_, i) => (
+              {Array.from({ length: 6 }, (_, i) => (
                 <SkeletonCard key={i} />
               ))}
             </div>
-          ) : error ? (
-            <EmptyState
-              icon="⚡"
-              title="Unable to Load Readers"
-              description={error}
-            />
           ) : readers.length === 0 ? (
-            <EmptyState
-              icon="🌙"
-              title="No Readers Online"
-              description="Check back soon or browse all our gifted readers."
-              action={{
-                label: 'Browse All Readers',
-                onClick: () => window.location.href = '/readers',
-                variant: 'secondary',
-              }}
-            />
-          ) : (
-            <>
-              <div className="grid grid--readers">
-                {readers.slice(0, 6).map((reader) => (
-                  <ReaderCard key={reader.id} reader={reader} />
-                ))}
+            <div className="card card--static text-center">
+              <div className="flex flex-col gap-4 items-center">
+                <span className="empty-state__icon" aria-hidden="true">🌙</span>
+                <p className="body-text">
+                  No readers are online right now. Check back soon or browse all
+                  our readers to find someone who resonates with you.
+                </p>
+                <Link to="/readers">
+                  <Button variant="secondary">Browse All Readers</Button>
+                </Link>
               </div>
-              {readers.length > 6 && (
-                <div className="text-center" style={{ marginTop: 'var(--space-8)' }}>
-                  <Link to="/readers">
-                    <Button variant="secondary" size="lg">
-                      View All Readers
-                    </Button>
-                  </Link>
-                </div>
-              )}
-            </>
+            </div>
+          ) : (
+            <div className="grid grid--readers">
+              {readers.map((reader) => (
+                <ReaderCard key={reader.id} reader={reader} />
+              ))}
+            </div>
           )}
-        </div>
-      </section>
 
-      <div className="divider" />
-
-      {/* ─── Newsletter ────────────────────────────────────── */}
-      <section className="section">
-        <div className="container container--form text-center">
-          <h2 style={{ marginBottom: 'var(--space-3)' }}>Stay Connected</h2>
-          <p style={{ marginBottom: 'var(--space-6)' }}>
-            Get spiritual insights and updates delivered to your inbox.
-          </p>
-
-          {subscribed ? (
-            <Card variant="static" className="text-center">
-              <p style={{ color: '#86EFAC', fontWeight: 600 }}>
-                ✨ You're subscribed! Watch your inbox for cosmic updates.
-              </p>
-            </Card>
-          ) : (
-            <form onSubmit={handleNewsletter} className="flex gap-3">
-              <div style={{ flex: 1 }}>
-                <Input
-                  type="email"
-                  placeholder="Enter your email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  aria-label="Email address for newsletter"
-                />
-              </div>
-              <Button type="submit" variant="primary" loading={subscribing}>
-                Subscribe
+          <div className="text-center" style={{ marginTop: 'var(--space-8)' }}>
+            <Link to="/readers">
+              <Button variant="secondary" size="lg">
+                View All Readers →
               </Button>
-            </form>
-          )}
+            </Link>
+          </div>
         </div>
       </section>
 
-      <div className="divider" />
-
-      {/* ─── Community Links ───────────────────────────────── */}
+      {/* ── Newsletter Signup ────────────────────────── */}
       <section className="section">
-        <div className="container container--form text-center">
-          <h2 style={{ marginBottom: 'var(--space-3)' }}>Join Our Community</h2>
-          <p style={{ marginBottom: 'var(--space-6)' }}>
-            Connect with fellow seekers and gifted readers in our growing spiritual community.
-          </p>
-          <div className="flex gap-4 justify-center flex-wrap">
+        <div className="container container--narrow text-center">
+          <div className="section-title">
+            <h2 className="section-title__text">Stay Connected</h2>
+            <p className="section-title__sub">
+              Receive spiritual insights and community updates
+            </p>
+            <div className="section-title__divider" />
+          </div>
+          <form className="newsletter" onSubmit={handleNewsletter}>
+            <input
+              type="email"
+              className="form-input"
+              placeholder="Enter your email address"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              aria-label="Email address for newsletter"
+              required
+            />
+            <Button
+              type="submit"
+              variant="gold"
+              loading={submitting}
+              disabled={submitting}
+            >
+              Subscribe
+            </Button>
+          </form>
+        </div>
+      </section>
+
+      {/* ── Community Links ──────────────────────────── */}
+      <section className="section section--cosmic">
+        <div className="container container--narrow">
+          <div className="section-title">
+            <h2 className="section-title__text">Join Our Community</h2>
+            <p className="section-title__sub">
+              Connect with fellow seekers beyond the app
+            </p>
+            <div className="section-title__divider" />
+          </div>
+          <div className="grid grid--2">
             <a
               href="https://www.facebook.com/groups/soulseer"
               target="_blank"
               rel="noopener noreferrer"
+              className="card card--interactive community-link"
+              aria-label="Join SoulSeer Facebook Group (opens in new tab)"
             >
-              <Button variant="secondary">Facebook Group</Button>
+              <span className="community-link__icon" aria-hidden="true">📘</span>
+              <div>
+                <p className="community-link__title">Facebook Group</p>
+                <p className="community-link__desc">
+                  Share experiences, ask questions, and connect with our
+                  spiritual community on Facebook.
+                </p>
+              </div>
             </a>
             <a
               href="https://discord.gg/soulseer"
               target="_blank"
               rel="noopener noreferrer"
+              className="card card--interactive community-link"
+              aria-label="Join SoulSeer Discord Server (opens in new tab)"
             >
-              <Button variant="secondary">Discord Server</Button>
+              <span className="community-link__icon" aria-hidden="true">💜</span>
+              <div>
+                <p className="community-link__title">Discord Server</p>
+                <p className="community-link__desc">
+                  Real-time conversations, events, and community chats
+                  in our Discord server.
+                </p>
+              </div>
             </a>
           </div>
         </div>
       </section>
-
-      {/* ─── Footer ────────────────────────────────────────── */}
-      <footer className="footer">
-        <p className="footer__brand">SoulSeer</p>
-        <p className="footer__copy">
-          © {new Date().getFullYear()} SoulSeer. All rights reserved.
-        </p>
-      </footer>
     </div>
   );
 }

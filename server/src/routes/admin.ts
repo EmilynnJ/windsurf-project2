@@ -1,449 +1,446 @@
-import { Router } from 'express';
-import { z } from 'zod';
-import { eq, desc, sql } from 'drizzle-orm';
-import { db } from '../db/db';
-import {
-  users,
-  readings,
-  transactions,
-  forumPosts,
-  forumComments,
-  forumFlags,
-} from '../db/schema';
-import { checkJwt } from '../middleware/auth';
-import { resolveUser, requireRole } from '../middleware/rbac';
-import { validate } from '../middleware/validate';
-import {
-  createPayout,
-  createConnectAccount,
-  refundReading,
-} from '../services/stripe-service';
-import { AppError } from '../middleware/error-handler';
-import { logger } from '../utils/logger';
+// ============================================================
+// Admin Routes — User management, reader creation, moderation
+//
+// All routes require admin role (enforced by middleware).
+// ============================================================
+
+import { Router } from "express";
+import { eq, and, desc, sql, count } from "drizzle-orm";
+import { z } from "zod";
+import Stripe from "stripe";
+import crypto from "crypto";
+
+import { getDb } from "../db/db";
+import { users, readings, transactions, forumPosts, forumComments, forumFlags } from "../db/schema";
+import { checkJwt } from "../middleware/auth";
+import { requireRole } from "../middleware/rbac";
+import { validate } from "../middleware/validate";
+import { AppError } from "../middleware/error-handler";
+import { logger } from "../utils/logger";
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2024-06-20" as any,
+});
 
 const router = Router();
 
-// All admin routes require admin role
-router.use(checkJwt, resolveUser, requireRole('admin'));
+// All admin routes require auth + admin role
+router.use(checkJwt);
+router.use(requireRole("admin"));
 
-// ─── Schemas ────────────────────────────────────────────────────────────────
-
-const createReaderSchema = z.object({
-  email: z.string().email(),
-  fullName: z.string().min(1).max(100),
-  username: z.string().min(1).max(50).optional(),
-  bio: z.string().max(2000).optional(),
-  specialties: z.string().max(500).optional(),
-  pricingChat: z.number().int().min(0).default(0),
-  pricingVoice: z.number().int().min(0).default(0),
-  pricingVideo: z.number().int().min(0).default(0),
-  auth0Id: z.string().min(1),
-});
-
-const updateReaderSchema = z.object({
-  fullName: z.string().max(100).optional(),
-  username: z.string().max(50).optional(),
-  bio: z.string().max(2000).optional(),
-  specialties: z.string().max(500).optional(),
-  pricingChat: z.number().int().min(0).optional(),
-  pricingVoice: z.number().int().min(0).optional(),
-  pricingVideo: z.number().int().min(0).optional(),
-  isOnline: z.boolean().optional(),
-});
-
-const balanceAdjustSchema = z.object({
-  amount: z.number().int(),
-  description: z.string().min(1).max(500),
-});
-
-// ─── GET /api/admin/users ────────────────────────────────────────────────────
-
-router.get('/users', async (req, res, next) => {
+// ── GET /api/admin/users — List all users ───────────────────────────────
+router.get("/users", async (_req, res, next) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 50));
-    const offset = (page - 1) * limit;
-
-    const allUsers = await db
-      .select()
+    const db = getDb();
+    const result = await db
+      .select({
+        id: users.id,
+        email: users.email,
+        username: users.username,
+        fullName: users.fullName,
+        role: users.role,
+        profileImage: users.profileImage,
+        isOnline: users.isOnline,
+        balance: users.balance,
+        totalReadings: users.totalReadings,
+        createdAt: users.createdAt,
+      })
       .from(users)
-      .orderBy(desc(users.createdAt))
-      .limit(limit)
-      .offset(offset);
+      .orderBy(desc(users.createdAt));
 
-    const [countResult] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(users);
-
-    res.json({
-      users: allUsers.map(({ auth0Id, ...u }) => u),
-      pagination: { page, limit, total: countResult?.count ?? 0 },
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ─── POST /api/admin/readers — create reader account ────────────────────────
-
-router.post(
-  '/readers',
-  validate(createReaderSchema),
-  async (req, res, next) => {
-    try {
-      const body = req.body as z.infer<typeof createReaderSchema>;
-
-      const [existing] = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.auth0Id, body.auth0Id))
-        .limit(1);
-      if (existing) throw new AppError(409, 'A user with this Auth0 ID already exists');
-
-      const [reader] = await db
-        .insert(users)
-        .values({
-          auth0Id: body.auth0Id,
-          email: body.email,
-          fullName: body.fullName,
-          username: body.username ?? null,
-          bio: body.bio ?? null,
-          specialties: body.specialties ?? null,
-          role: 'reader',
-          pricingChat: body.pricingChat,
-          pricingVoice: body.pricingVoice,
-          pricingVideo: body.pricingVideo,
-          accountBalance: 0,
-          totalEarnings: 0,
-          totalSpent: 0,
-          isOnline: false,
-        })
-        .returning();
-
-      logger.info(
-        { readerId: reader!.id, email: body.email },
-        'Reader account created by admin',
-      );
-      res.status(201).json(reader);
-    } catch (err) {
-      next(err);
-    }
-  },
-);
-
-// ─── PUT /api/admin/readers/:id — edit reader ───────────────────────────────
-
-router.put(
-  '/readers/:id',
-  validate(updateReaderSchema),
-  async (req, res, next) => {
-    try {
-      const readerId = parseInt(req.params.id!, 10);
-      if (isNaN(readerId)) throw new AppError(400, 'Invalid reader ID');
-
-      const body = req.body as z.infer<typeof updateReaderSchema>;
-      const updates: Record<string, any> = {};
-      for (const [key, value] of Object.entries(body)) {
-        if (value !== undefined) updates[key] = value;
-      }
-      if (Object.keys(updates).length === 0) throw new AppError(400, 'No fields to update');
-
-      const [updated] = await db
-        .update(users)
-        .set(updates)
-        .where(eq(users.id, readerId))
-        .returning();
-      if (!updated) throw new AppError(404, 'Reader not found');
-
-      res.json(updated);
-    } catch (err) {
-      next(err);
-    }
-  },
-);
-
-// ─── GET /api/admin/readings — all readings ─────────────────────────────────
-
-router.get('/readings', async (req, res, next) => {
-  try {
-    const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 50));
-    const offset = (page - 1) * limit;
-
-    const allReadings = await db
-      .select()
-      .from(readings)
-      .orderBy(desc(readings.createdAt))
-      .limit(limit)
-      .offset(offset);
-
-    const [countResult] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(readings);
-
-    res.json({
-      readings: allReadings,
-      pagination: { page, limit, total: countResult?.count ?? 0 },
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ─── GET /api/admin/transactions — all transactions ─────────────────────────
-
-router.get('/transactions', async (req, res, next) => {
-  try {
-    const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 50));
-    const offset = (page - 1) * limit;
-
-    const txns = await db
-      .select()
-      .from(transactions)
-      .orderBy(desc(transactions.createdAt))
-      .limit(limit)
-      .offset(offset);
-
-    const [countResult] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(transactions);
-
-    res.json({
-      transactions: txns,
-      pagination: { page, limit, total: countResult?.count ?? 0 },
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ─── POST /api/admin/users/:id/balance — manual balance adjustment ──────────
-
-router.post(
-  '/users/:id/balance',
-  validate(balanceAdjustSchema),
-  async (req, res, next) => {
-    try {
-      const userId = parseInt(req.params.id!, 10);
-      if (isNaN(userId)) throw new AppError(400, 'Invalid user ID');
-
-      const { amount, description } = req.body as z.infer<typeof balanceAdjustSchema>;
-
-      // Get current balance
-      const [currentUser] = await db
-        .select({ accountBalance: users.accountBalance })
-        .from(users)
-        .where(eq(users.id, userId))
-        .limit(1);
-
-      if (!currentUser) throw new AppError(404, 'User not found');
-      const balanceBefore = currentUser.accountBalance;
-
-      const [updated] = await db
-        .update(users)
-        .set({ accountBalance: sql`${users.accountBalance} + ${amount}` })
-        .where(eq(users.id, userId))
-        .returning({ id: users.id, accountBalance: users.accountBalance });
-
-      if (!updated) throw new AppError(404, 'User not found');
-
-      await db.insert(transactions).values({
-        userId,
-        type: 'adjustment',
-        amount,
-        balanceBefore,
-        balanceAfter: updated.accountBalance,
-        description: `Admin adjustment: ${description}`,
-      });
-
-      logger.info(
-        { userId, amount, adminId: req.user!.id, description },
-        'Balance adjusted by admin',
-      );
-      res.json({ userId: updated.id, newBalance: updated.accountBalance });
-    } catch (err) {
-      next(err);
-    }
-  },
-);
-
-// ─── GET /api/admin/flags — flagged content queue ───────────────────────────
-
-router.get('/flags', async (req, res, next) => {
-  try {
-    const flags = await db
-      .select()
-      .from(forumFlags)
-      .where(eq(forumFlags.resolved, false))
-      .orderBy(desc(forumFlags.createdAt))
-      .limit(50);
-    res.json(flags);
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ─── PUT /api/admin/flags/:id/resolve — resolve flag ─────────────────────────
-
-router.put('/flags/:id/resolve', async (req, res, next) => {
-  try {
-    const flagId = parseInt(req.params.id!, 10);
-    if (isNaN(flagId)) throw new AppError(400, 'Invalid flag ID');
-
-    const [updated] = await db
-      .update(forumFlags)
-      .set({ resolved: true, reviewedAt: new Date() })
-      .where(eq(forumFlags.id, flagId))
-      .returning();
-
-    if (!updated) throw new AppError(404, 'Flag not found');
-    logger.info({ flagId, adminId: req.user!.id }, 'Flag resolved by admin');
-    res.json(updated);
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ─── DELETE /api/admin/posts/:id — delete post ──────────────────────────────
-
-router.delete('/posts/:id', async (req, res, next) => {
-  try {
-    const postId = parseInt(req.params.id!, 10);
-    if (isNaN(postId)) throw new AppError(400, 'Invalid post ID');
-
-    await db
-      .update(forumPosts)
-      .set({ isDeleted: true })
-      .where(eq(forumPosts.id, postId));
-
-    // Resolve any flags for this post
-    await db
-      .update(forumFlags)
-      .set({ resolved: true, reviewedAt: new Date() })
-      .where(eq(forumFlags.postId, postId));
-
-    logger.info({ postId, adminId: req.user!.id }, 'Post deleted by admin');
-    res.json({ message: 'Post deleted' });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ─── DELETE /api/admin/comments/:id — delete comment ────────────────────────
-
-router.delete('/comments/:id', async (req, res, next) => {
-  try {
-    const commentId = parseInt(req.params.id!, 10);
-    if (isNaN(commentId)) throw new AppError(400, 'Invalid comment ID');
-
-    const [comment] = await db
-      .select()
-      .from(forumComments)
-      .where(eq(forumComments.id, commentId))
-      .limit(1);
-
-    await db
-      .update(forumComments)
-      .set({ isDeleted: true })
-      .where(eq(forumComments.id, commentId));
-
-    if (comment) {
-      await db
-        .update(forumPosts)
-        .set({ commentCount: sql`GREATEST(${forumPosts.commentCount} - 1, 0)` })
-        .where(eq(forumPosts.id, comment.postId));
-    }
-
-    await db
-      .update(forumFlags)
-      .set({ resolved: true, reviewedAt: new Date() })
-      .where(eq(forumFlags.commentId, commentId));
-
-    logger.info({ commentId, adminId: req.user!.id }, 'Comment deleted by admin');
-    res.json({ message: 'Comment deleted' });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ─── POST /api/admin/payouts/:userId — trigger payout for reader ────────────
-
-router.post('/payouts/:userId', async (req, res, next) => {
-  try {
-    const readerId = parseInt(req.params.userId!, 10);
-    if (isNaN(readerId)) throw new AppError(400, 'Invalid user ID');
-    const result = await createPayout(readerId);
     res.json(result);
   } catch (err) {
     next(err);
   }
 });
 
-// ─── POST /api/admin/refunds/:readingId — refund a reading ─────────────────
+// ── POST /api/admin/readers — Create a new reader account ───────────────
+const createReaderSchema = z.object({
+  email: z.string().email(),
+  fullName: z.string().min(1).max(255),
+  username: z.string().min(1).max(100),
+  bio: z.string().optional(),
+  specialties: z.string().optional(),
+  pricingChat: z.number().int().min(0).default(0),
+  pricingVoice: z.number().int().min(0).default(0),
+  pricingVideo: z.number().int().min(0).default(0),
+  profileImage: z.string().url().optional(),
+});
 
-router.post('/refunds/:readingId', async (req, res, next) => {
+router.post("/readers", validate(createReaderSchema), async (req, res, next) => {
   try {
-    const readingId = parseInt(req.params.readingId!, 10);
-    if (isNaN(readingId)) throw new AppError(400, 'Invalid reading ID');
+    const db = getDb();
+    const body = req.body;
 
-    const [reading] = await db
-      .select()
-      .from(readings)
-      .where(eq(readings.id, readingId))
-      .limit(1);
-    if (!reading) throw new AppError(404, 'Reading not found');
-    if (reading.status !== 'completed') throw new AppError(400, 'Can only refund completed readings');
+    // Generate a temp auth0Id (reader logs in via Auth0 with credentials set by admin)
+    const tempAuth0Id = `admin_created_${crypto.randomUUID()}`;
+    // Generate initial password for the reader
+    const initialPassword = crypto.randomBytes(8).toString("hex");
 
-    const refundAmount = reading.totalCost;
-    if (refundAmount <= 0) throw new AppError(400, 'Nothing to refund');
+    // Create reader in DB
+    const [reader] = await db
+      .insert(users)
+      .values({
+        auth0Id: tempAuth0Id,
+        email: body.email,
+        fullName: body.fullName,
+        username: body.username,
+        role: "reader",
+        bio: body.bio ?? null,
+        specialties: body.specialties ?? null,
+        pricingChat: body.pricingChat,
+        pricingVoice: body.pricingVoice,
+        pricingVideo: body.pricingVideo,
+        profileImage: body.profileImage ?? null,
+        balance: 0,
+      })
+      .returning();
 
-    await refundReading(readingId, reading.clientId, refundAmount);
+    // Create Stripe Connect Express account
+    try {
+      const account = await stripe.accounts.create({
+        type: "express",
+        email: body.email,
+        metadata: { readerId: reader!.id.toString() },
+      });
 
-    // Update reading status
-    await db
-      .update(readings)
-      .set({ status: 'cancelled', paymentStatus: 'refunded' })
-      .where(eq(readings.id, readingId));
+      await db
+        .update(users)
+        .set({ stripeAccountId: account.id, updatedAt: new Date() })
+        .where(eq(users.id, reader!.id));
 
-    logger.info(
-      { readingId, clientId: reading.clientId, refundAmount, adminId: req.user!.id },
-      'Reading refunded',
-    );
-    res.json({ readingId, refundAmount, message: 'Reading refunded successfully' });
+      // Generate onboarding link
+      const accountLink = await stripe.accountLinks.create({
+        account: account.id,
+        refresh_url: `${process.env.CLIENT_URL}/dashboard`,
+        return_url: `${process.env.CLIENT_URL}/dashboard`,
+        type: "account_onboarding",
+      });
+
+      logger.info({ readerId: reader!.id, stripeAccount: account.id }, "Reader Stripe Connect created");
+
+      res.status(201).json({
+        reader: { ...reader, stripeAccountId: account.id },
+        initialPassword,
+        stripeOnboardingUrl: accountLink.url,
+      });
+    } catch (stripeErr) {
+      logger.error({ err: stripeErr, readerId: reader!.id }, "Failed to create Stripe Connect");
+      res.status(201).json({
+        reader,
+        initialPassword,
+        stripeOnboardingUrl: null,
+        warning: "Reader created but Stripe Connect setup failed. Set up manually.",
+      });
+    }
   } catch (err) {
     next(err);
   }
 });
 
-// ─── GET /api/admin/stats — dashboard stats ─────────────────────────────────
-
-router.get('/stats', async (req, res, next) => {
+// ── PATCH /api/admin/readers/:id — Update reader profile ────────────────
+router.patch("/readers/:id", async (req, res, next) => {
   try {
-    const [userCount] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(users);
+    const db = getDb();
+    const readerId = parseInt(req.params.id!, 10);
 
-    const [readerCount] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(users)
-      .where(eq(users.role, 'reader'));
+    const allowedFields = [
+      "fullName", "username", "bio", "specialties", "profileImage",
+      "pricingChat", "pricingVoice", "pricingVideo",
+    ];
+    const updates: Record<string, any> = {};
 
-    const [readingCount] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(readings);
+    for (const field of allowedFields) {
+      if (req.body[field] !== undefined) {
+        updates[field] = req.body[field];
+      }
+    }
 
-    const [revenue] = await db
-      .select({ total: sql<number>`COALESCE(SUM(amount), 0)::int` })
+    if (Object.keys(updates).length === 0) {
+      throw new AppError(400, "No valid fields to update");
+    }
+
+    updates.updatedAt = new Date();
+
+    const [updated] = await db
+      .update(users)
+      .set(updates)
+      .where(and(eq(users.id, readerId), eq(users.role, "reader")))
+      .returning();
+
+    if (!updated) throw new AppError(404, "Reader not found");
+    res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── GET /api/admin/readings — All readings ──────────────────────────────
+router.get("/readings", async (req, res, next) => {
+  try {
+    const db = getDb();
+    const status = req.query.status as string | undefined;
+    const conditions = status ? eq(readings.status, status as any) : undefined;
+
+    const result = await db
+      .select()
+      .from(readings)
+      .where(conditions)
+      .orderBy(desc(readings.createdAt))
+      .limit(200);
+
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── GET /api/admin/transactions — All transactions ──────────────────────
+router.get("/transactions", async (_req, res, next) => {
+  try {
+    const db = getDb();
+    const result = await db
+      .select({
+        id: transactions.id,
+        userId: transactions.userId,
+        readingId: transactions.readingId,
+        type: transactions.type,
+        amount: transactions.amount,
+        balanceAfter: transactions.balanceAfter,
+        note: transactions.note,
+        stripePaymentIntentId: transactions.stripePaymentIntentId,
+        createdAt: transactions.createdAt,
+        userName: users.fullName,
+        userEmail: users.email,
+      })
       .from(transactions)
-      .where(eq(transactions.type, 'top_up'));
+      .innerJoin(users, eq(transactions.userId, users.id))
+      .orderBy(desc(transactions.createdAt))
+      .limit(500);
 
-    res.json({
-      totalUsers: userCount?.count ?? 0,
-      totalReaders: readerCount?.count ?? 0,
-      totalReadings: readingCount?.count ?? 0,
-      totalRevenue: revenue?.total ?? 0,
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── POST /api/admin/balance-adjust — Manual balance adjustment ──────────
+const balanceAdjustSchema = z.object({
+  userId: z.number().int().positive(),
+  amount: z.number().int(), // positive to add, negative to deduct
+  reason: z.string().min(1).max(500),
+});
+
+router.post(
+  "/balance-adjust",
+  validate(balanceAdjustSchema),
+  async (req, res, next) => {
+    try {
+      const db = getDb();
+      const { userId, amount, reason } = req.body;
+
+      await db.transaction(async (tx) => {
+        const [currentUser] = await tx
+          .select({ balance: users.balance })
+          .from(users)
+          .where(eq(users.id, userId));
+
+        if (!currentUser) throw new AppError(404, "User not found");
+
+        const newBalance = currentUser.balance + amount;
+        if (newBalance < 0) throw new AppError(400, "Adjustment would result in negative balance");
+
+        await tx
+          .update(users)
+          .set({ balance: newBalance, updatedAt: new Date() })
+          .where(eq(users.id, userId));
+
+        await tx.insert(transactions).values({
+          userId,
+          type: "admin_adjustment",
+          amount,
+          balanceAfter: newBalance,
+          note: `Admin adjustment: ${reason}`,
+        });
+      });
+
+      // Fetch updated user
+      const [updated] = await db
+        .select({ id: users.id, balance: users.balance })
+        .from(users)
+        .where(eq(users.id, userId));
+
+      logger.info({ userId, amount, reason, admin: req.user!.id }, "Balance adjusted");
+      res.json({ userId: updated!.id, newBalance: updated!.balance });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// ── GET /api/admin/flags — Pending forum flags ──────────────────────────
+router.get("/flags", async (_req, res, next) => {
+  try {
+    const db = getDb();
+    const flags = await db
+      .select({
+        id: forumFlags.id,
+        postId: forumFlags.postId,
+        commentId: forumFlags.commentId,
+        reason: forumFlags.reason,
+        resolved: forumFlags.resolved,
+        createdAt: forumFlags.createdAt,
+        reporterName: users.fullName,
+        reporterEmail: users.email,
+      })
+      .from(forumFlags)
+      .innerJoin(users, eq(forumFlags.reporterId, users.id))
+      .where(eq(forumFlags.resolved, false))
+      .orderBy(desc(forumFlags.createdAt));
+
+    res.json(flags);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── POST /api/admin/flags/:id/resolve — Resolve a flag ──────────────────
+router.post("/flags/:id/resolve", async (req, res, next) => {
+  try {
+    const db = getDb();
+    const flagId = parseInt(req.params.id!, 10);
+
+    const [updated] = await db
+      .update(forumFlags)
+      .set({ resolved: true })
+      .where(eq(forumFlags.id, flagId))
+      .returning();
+
+    if (!updated) throw new AppError(404, "Flag not found");
+    res.json({ resolved: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── DELETE /api/admin/posts/:id — Delete forum post ─────────────────────
+router.delete("/posts/:id", async (req, res, next) => {
+  try {
+    const db = getDb();
+    const postId = parseInt(req.params.id!, 10);
+
+    // Delete post (cascade deletes comments and flags)
+    const [deleted] = await db
+      .delete(forumPosts)
+      .where(eq(forumPosts.id, postId))
+      .returning();
+
+    if (!deleted) throw new AppError(404, "Post not found");
+
+    // Resolve any flags for this post
+    await db
+      .update(forumFlags)
+      .set({ resolved: true })
+      .where(eq(forumFlags.postId, postId));
+
+    logger.info({ postId, admin: req.user!.id }, "Forum post deleted");
+    res.json({ deleted: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── DELETE /api/admin/comments/:id — Delete forum comment ───────────────
+router.delete("/comments/:id", async (req, res, next) => {
+  try {
+    const db = getDb();
+    const commentId = parseInt(req.params.id!, 10);
+
+    const [deleted] = await db
+      .delete(forumComments)
+      .where(eq(forumComments.id, commentId))
+      .returning();
+
+    if (!deleted) throw new AppError(404, "Comment not found");
+
+    // Resolve any flags for this comment
+    await db
+      .update(forumFlags)
+      .set({ resolved: true })
+      .where(eq(forumFlags.commentId, commentId));
+
+    logger.info({ commentId, admin: req.user!.id }, "Forum comment deleted");
+    res.json({ deleted: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── POST /api/admin/readings/:id/refund — Refund a reading ─────────────
+router.post("/readings/:id/refund", async (req, res, next) => {
+  try {
+    const db = getDb();
+    const readingId = parseInt(req.params.id!, 10);
+
+    const [reading] = await db
+      .select()
+      .from(readings)
+      .where(eq(readings.id, readingId));
+    if (!reading) throw new AppError(404, "Reading not found");
+    if (reading.status !== "completed") throw new AppError(400, "Can only refund completed readings");
+    if (reading.totalCharged === 0) throw new AppError(400, "Nothing to refund");
+
+    const refundAmount = reading.totalCharged;
+    const readerDebit = reading.readerEarned;
+
+    await db.transaction(async (tx) => {
+      // Mark reading as cancelled
+      await tx
+        .update(readings)
+        .set({ status: "cancelled", updatedAt: new Date() })
+        .where(eq(readings.id, readingId));
+
+      // Credit client
+      const [clientUpdated] = await tx
+        .update(users)
+        .set({
+          balance: sql`${users.balance} + ${refundAmount}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, reading.clientId))
+        .returning({ balance: users.balance });
+
+      await tx.insert(transactions).values({
+        userId: reading.clientId,
+        readingId,
+        type: "refund",
+        amount: refundAmount,
+        balanceAfter: clientUpdated?.balance ?? 0,
+        note: `Refund for reading #${readingId}`,
+      });
+
+      // Debit reader
+      const [readerUpdated] = await tx
+        .update(users)
+        .set({
+          balance: sql`GREATEST(${users.balance} - ${readerDebit}, 0)`,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, reading.readerId))
+        .returning({ balance: users.balance });
+
+      await tx.insert(transactions).values({
+        userId: reading.readerId,
+        readingId,
+        type: "refund",
+        amount: -readerDebit,
+        balanceAfter: readerUpdated?.balance ?? 0,
+        note: `Refund debit for reading #${readingId}`,
+      });
     });
+
+    logger.info({ readingId, refundAmount, admin: req.user!.id }, "Reading refunded");
+    res.json({ refunded: true, amount: refundAmount });
   } catch (err) {
     next(err);
   }
