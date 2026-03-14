@@ -11,6 +11,7 @@ import { ClientDashboard } from "../pages/ClientDashboard";
 import { ReaderDashboard } from "../pages/ReaderDashboard";
 import { LoginPage } from "../pages/LoginPage";
 import { HelpPage } from "../pages/HelpPage";
+import { AdminDashboard } from "../pages/admin/AdminDashboard";
 
 export function App() {
   return (
@@ -29,6 +30,7 @@ export function App() {
           <Route path="/dashboard/reader" element={<ReaderDashboard />} />
           <Route path="/session/:sessionId" element={<ReadingSessionPage />} />
           <Route path="/messages" element={<MessagingPage />} />
+          <Route path="/admin" element={<AdminDashboard />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </>
