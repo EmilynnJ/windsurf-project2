@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/db';
-import { users } from '@soulseer/shared/schema';
+import { users } from '../db/schema';
 import { checkJwt } from '../middleware/auth';
 import { resolveUser } from '../middleware/rbac';
 import { validate } from '../middleware/validate';

@@ -1,12 +1,12 @@
 import Stripe from 'stripe';
 import { eq, sql } from 'drizzle-orm';
 import { db } from '../db/db';
-import { users, transactions } from '@soulseer/shared/schema';
+import { users, transactions } from '../db/schema';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import { AppError } from '../middleware/error-handler';
 
-const stripe = new Stripe(config.stripe.secretKey, { apiVersion: '2024-12-18.acacia' });
+const stripe = new Stripe(config.stripe.secretKey, { apiVersion: '2024-12-18.acacia' as any });
 
 const MIN_TOPUP_CENTS = 500;
 const MIN_PAYOUT_CENTS = 1500;
@@ -73,22 +73,36 @@ export async function handleWebhook(rawBody: Buffer, signature: string): Promise
       return;
     }
 
-    // Credit balance
+    // Get current balance before update
+    const [currentUser] = await db
+      .select({ accountBalance: users.accountBalance })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    const balanceBefore = currentUser?.accountBalance ?? 0;
+
+    // Credit balance atomically
     await db
       .update(users)
-      .set({ accountBalance: sql`${users.accountBalance} + ${amount}` })
+      .set({
+        accountBalance: sql`${users.accountBalance} + ${amount}`,
+        totalSpent: sql`${users.totalSpent} + ${amount}`,
+      })
       .where(eq(users.id, userId));
 
-    // Record transaction
+    // Record transaction with full audit trail
     await db.insert(transactions).values({
       userId,
       type: 'top_up',
       amount,
+      balanceBefore,
+      balanceAfter: balanceBefore + amount,
       stripePaymentId: pi.id,
       description: `Balance top-up: $${(amount / 100).toFixed(2)}`,
     });
 
-    logger.info({ userId, amount, paymentIntentId: pi.id }, 'Balance credited');
+    logger.info({ userId, amount, paymentIntentId: pi.id }, 'Balance credited via webhook');
   }
 }
 
@@ -110,7 +124,7 @@ export async function createConnectAccount(
 
   await db
     .update(users)
-    .set({ stripeConnectId: account.id })
+    .set({ stripeAccountId: account.id })
     .where(eq(users.id, userId));
 
   const accountLink = await stripe.accountLinks.create({
@@ -133,26 +147,27 @@ export async function createPayout(
   const [reader] = await db.select().from(users).where(eq(users.id, readerId)).limit(1);
   if (!reader) throw new AppError(404, 'Reader not found');
   if (reader.role !== 'reader') throw new AppError(400, 'User is not a reader');
-  if (!reader.stripeConnectId) throw new AppError(400, 'Reader has no Stripe Connect account');
+  if (!reader.stripeAccountId) throw new AppError(400, 'Reader has no Stripe Connect account');
   if (reader.accountBalance < MIN_PAYOUT_CENTS) {
     throw new AppError(400, `Minimum payout is $${(MIN_PAYOUT_CENTS / 100).toFixed(2)}`);
   }
 
   const payoutAmount = reader.accountBalance;
+  const balanceBefore = reader.accountBalance;
 
-  // Deduct balance atomically
+  // Deduct balance atomically — only succeeds if balance hasn't changed
   const result = await db
     .update(users)
-    .set({ accountBalance: sql`${users.accountBalance} - ${payoutAmount}` })
-    .where(sql`${users.id} = ${readerId} AND ${users.accountBalance} >= ${payoutAmount}`)
+    .set({ accountBalance: 0 })
+    .where(sql`${users.id} = ${readerId} AND ${users.accountBalance} = ${payoutAmount}`)
     .returning({ id: users.id });
 
-  if (result.length === 0) throw new AppError(400, 'Insufficient balance for payout');
+  if (result.length === 0) throw new AppError(409, 'Balance changed during payout, please retry');
 
   const transfer = await stripe.transfers.create({
     amount: payoutAmount,
     currency: 'usd',
-    destination: reader.stripeConnectId,
+    destination: reader.stripeAccountId,
     metadata: { readerId: String(readerId), type: 'reader_payout' },
   });
 
@@ -160,6 +175,8 @@ export async function createPayout(
     userId: readerId,
     type: 'payout',
     amount: -payoutAmount,
+    balanceBefore,
+    balanceAfter: 0,
     stripePaymentId: transfer.id,
     description: `Payout: $${(payoutAmount / 100).toFixed(2)}`,
   });
@@ -176,6 +193,14 @@ export async function refundReading(
   clientId: number,
   amount: number,
 ): Promise<void> {
+  const [currentUser] = await db
+    .select({ accountBalance: users.accountBalance })
+    .from(users)
+    .where(eq(users.id, clientId))
+    .limit(1);
+
+  const balanceBefore = currentUser?.accountBalance ?? 0;
+
   // Credit client balance back
   await db
     .update(users)
@@ -184,8 +209,10 @@ export async function refundReading(
 
   await db.insert(transactions).values({
     userId: clientId,
-    type: 'adjustment',
+    type: 'refund',
     amount,
+    balanceBefore,
+    balanceAfter: balanceBefore + amount,
     readingId,
     description: `Refund for reading #${readingId}: $${(amount / 100).toFixed(2)}`,
   });
