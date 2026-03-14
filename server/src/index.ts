@@ -5,6 +5,8 @@ import express from "express";
 import helmet from "helmet";
 import pinoHttp from "pino-http";
 import { getPool } from "./db/db";
+import authRoutes from "./routes/auth";
+import paymentRoutes from "./payment/payment-routes";
 
 const app = express();
 
@@ -26,6 +28,10 @@ app.get("/api/db-check", async (_req, res) => {
   const result = await getPool().query("select 1 as ok");
   res.json({ ok: result.rows[0]?.ok === 1 });
 });
+
+// API routes
+app.use("/api/auth", authRoutes);
+app.use("/api/payment", paymentRoutes);
 
 const port = Number(process.env.PORT ?? 3001);
 app.listen(port, () => {

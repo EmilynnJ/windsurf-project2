@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../db/db';
 import { users } from '@soulseer/shared/schema';
+import { authMiddleware } from '../middleware/auth';
 
 // Extend the Express Request type to include auth property
 interface AuthenticatedRequest extends Request {
