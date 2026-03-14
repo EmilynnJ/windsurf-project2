@@ -1,11 +1,50 @@
-node_modules
+# Dependencies
+node_modules/
 
+# Build output
+dist/
+build/
+.vercel/
+
+# Environment variables
 .env
 .env.local
-.env.*
-.env.example
+.env.development
+.env.production
+.env.staging
+.env.*.local
+!.env.example
 
-dist
+# TypeScript
+*.tsbuildinfo
+
+# Drizzle
+drizzle/meta/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
 .DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Logs
 *.log
-node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Testing
+coverage/
+.nyc_output/
+
+# Misc
+*.tgz
+.cache/

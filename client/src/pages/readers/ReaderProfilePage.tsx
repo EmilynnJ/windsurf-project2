@@ -1,197 +1,398 @@
-import { useParams } from 'react-router-dom';
+// ============================================================
+// ReaderProfilePage — Full reader profile with reviews & start reading
+// ============================================================
 
-interface Reader {
-  id: number;
-  name: string;
-  specialty: string;
-  rating: number;
-  online: boolean;
-  avatar: string;
-  experience: string;
-  languages: string[];
-  price: string;
-  bio: string;
-  skills: string[];
-  availability: string[];
-  reviews: Review[];
+import { useState, useEffect, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useAuth } from '../../hooks/useAuth';
+import { useToast } from '../../components/ToastProvider';
+import { readersApi, readingsApi, reviewsApi } from '../../services/api';
+import type { ReaderPublic, ReviewWithAuthor, ReadingType } from '../../types';
+
+function formatCents(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`;
 }
 
-interface Review {
-  id: number;
-  userName: string;
-  rating: number;
-  comment: string;
-  date: string;
+function StarDisplay({ rating }: { rating: number }) {
+  return (
+    <span className="star-rating" aria-label={`${rating.toFixed(1)} out of 5 stars`}>
+      {[1, 2, 3, 4, 5].map((star) => (
+        <span key={star} style={{ opacity: star <= Math.round(rating) ? 1 : 0.3 }}>
+          ★
+        </span>
+      ))}
+    </span>
+  );
 }
-
-// Mock data for a reader
-const mockReader: Reader = {
-  id: 1,
-  name: 'Luna Starweaver',
-  specialty: 'Tarot & Spirituality',
-  rating: 4.9,
-  online: true,
-  avatar: '🌟',
-  experience: '10 years',
-  languages: ['English', 'Spanish'],
-  price: '$2.99/min',
-  bio: 'With over 10 years of experience in tarot and spiritual guidance, Luna helps her clients navigate life\'s challenges with clarity and insight. She specializes in love, career, and spiritual growth readings.',
-  skills: ['Tarot Reading', 'Clairvoyance', 'Past Life Regression', 'Chakra Balancing', 'Aura Cleansing'],
-  availability: ['Mon 10am-6pm EST', 'Tue 2pm-9pm EST', 'Wed 10am-6pm EST', 'Thu 12pm-8pm EST', 'Fri 10am-6pm EST'],
-  reviews: [
-    { id: 1, userName: 'Sarah M.', rating: 5, comment: 'Luna helped me see things clearly during a difficult time. Her insights were spot-on!', date: '2023-10-15' },
-    { id: 2, userName: 'Michael T.', rating: 5, comment: 'Amazing reading! Luna was able to provide guidance that changed my perspective completely.', date: '2023-09-22' },
-    { id: 3, userName: 'Jessica L.', rating: 4, comment: 'Very intuitive reader. She picked up on things I hadn\'t shared with anyone.', date: '2023-08-30' },
-    { id: 4, userName: 'David K.', rating: 5, comment: 'Luna\'s energy was calming and her advice was practical and helpful.', date: '2023-07-18' },
-  ]
-};
 
 export function ReaderProfilePage() {
-  useParams();
-  const reader = mockReader;
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { isAuthenticated, user, login } = useAuth();
+  const { addToast } = useToast();
 
-  return (
-    <div className="reader-profile-page" style={{
-      fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen, Ubuntu, Cantarell, Open Sans, Helvetica Neue, sans-serif',
-      padding: '2rem 0'
-    }}>
-      <div className="container" style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 20px' }}>
-        {/* Profile Header */}
-        <div className="card" style={{ padding: '2rem', marginBottom: '2rem' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-            <div style={{ fontSize: '6rem', marginBottom: '1rem' }}>{reader.avatar}</div>
-            <h1 style={{ fontSize: '2.5rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>{reader.name}</h1>
-            <p style={{ color: 'var(--text-muted)', fontSize: '1.2rem', marginBottom: '1rem' }}>{reader.specialty}</p>
-            
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
-              <span style={{ color: '#FBBF24', fontSize: '1.2rem' }}>★</span>
-              <span style={{ fontSize: '1.1rem' }}>{reader.rating} ({reader.reviews.length} reviews)</span>
-            </div>
-            
-            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', justifyContent: 'center', marginBottom: '1rem' }}>
-              <span style={{ 
-                backgroundColor: 'rgba(107, 70, 193, 0.2)', 
-                color: 'var(--primary-purple)',
-                padding: '0.5rem 1rem', 
-                borderRadius: 'var(--border-radius)',
-                fontSize: '0.9rem'
-              }}>
-                {reader.experience} experience
-              </span>
-              <span style={{ 
-                backgroundColor: 'rgba(139, 92, 246, 0.2)', 
-                color: 'var(--secondary-purple)',
-                padding: '0.5rem 1rem', 
-                borderRadius: 'var(--border-radius)',
-                fontSize: '0.9rem'
-              }}>
-                {reader.price}
-              </span>
-              {reader.online ? (
-                <span style={{ 
-                  backgroundColor: 'rgba(16, 185, 129, 0.2)', 
-                  color: '#10B981',
-                  padding: '0.5rem 1rem', 
-                  borderRadius: 'var(--border-radius)',
-                  fontSize: '0.9rem',
-                  display: 'flex',
-                  alignItems: 'center'
-                }}>
-                  <span style={{ width: '8px', height: '8px', backgroundColor: '#10B981', borderRadius: '50%', marginRight: '0.5rem', animation: 'pulse 1.5s infinite' }}></span>
-                  Online Now
-                </span>
-              ) : (
-                <span style={{ 
-                  backgroundColor: 'rgba(156, 163, 175, 0.2)', 
-                  color: '#9CA3AF',
-                  padding: '0.5rem 1rem', 
-                  borderRadius: 'var(--border-radius)',
-                  fontSize: '0.9rem'
-                }}>
-                  Offline
-                </span>
-              )}
-            </div>
-            
-            <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
-              <button className="btn btn-primary" style={{ fontSize: '1.1rem', padding: '0.75rem 2rem' }}>
-                Start Reading Session
-              </button>
-              <button className="btn btn-outline" style={{ fontSize: '1.1rem', padding: '0.75rem 2rem' }}>
-                Send Message
-              </button>
-            </div>
-          </div>
-        </div>
+  const [reader, setReader] = useState<ReaderPublic | null>(null);
+  const [reviews, setReviews] = useState<ReviewWithAuthor[]>([]);
+  const [averageRating, setAverageRating] = useState<number>(0);
+  const [reviewCount, setReviewCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [startingReading, setStartingReading] = useState<ReadingType | null>(null);
 
-        {/* Bio Section */}
-        <div className="card" style={{ padding: '2rem', marginBottom: '2rem' }}>
-          <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '1rem' }}>About {reader.name.split(' ')[0]}</h2>
-          <p style={{ color: 'var(--text-muted)', lineHeight: '1.6' }}>
-            {reader.bio}
-          </p>
-        </div>
+  useEffect(() => {
+    if (!id) return;
+    const readerId = parseInt(id);
+    if (isNaN(readerId)) {
+      setError('Invalid reader ID');
+      setIsLoading(false);
+      return;
+    }
 
-        {/* Skills Section */}
-        <div className="card" style={{ padding: '2rem', marginBottom: '2rem' }}>
-          <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '1rem' }}>Skills & Expertise</h2>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}>
-            {reader.skills.map((skill, index) => (
-              <span 
-                key={index}
-                style={{ 
-                  backgroundColor: 'rgba(139, 92, 246, 0.2)', 
-                  color: 'var(--secondary-purple)',
-                  padding: '0.5rem 1rem', 
-                  borderRadius: 'var(--border-radius)',
-                  fontSize: '0.9rem'
-                }}
-              >
-                {skill}
-              </span>
-            ))}
-          </div>
-        </div>
+    const fetchData = async () => {
+      try {
+        const [readerData, reviewsData] = await Promise.all([
+          readersApi.getReader(readerId),
+          reviewsApi.getReaderReviews(readerId, { limit: 10 }).catch(() => ({
+            reviews: [] as ReviewWithAuthor[],
+            count: 0,
+            averageRating: 0,
+          })),
+        ]);
+        setReader(readerData);
+        setReviews(reviewsData.reviews);
+        setAverageRating(reviewsData.averageRating);
+        setReviewCount(reviewsData.count);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load reader');
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-        {/* Availability Section */}
-        <div className="card" style={{ padding: '2rem', marginBottom: '2rem' }}>
-          <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '1rem' }}>Availability</h2>
-          <ul style={{ listStyle: 'none', padding: 0 }}>
-            {reader.availability.map((time, index) => (
-              <li 
-                key={index}
-                style={{ 
-                  padding: '0.75rem', 
-                  borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
-                  color: 'var(--text-muted)'
-                }}
-              >
-                {time}
-              </li>
-            ))}
-          </ul>
-        </div>
+    fetchData();
+  }, [id]);
 
-        {/* Reviews Section */}
-        <div className="card" style={{ padding: '2rem' }}>
-          <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '1rem' }}>Client Reviews</h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            {reader.reviews.map(review => (
-              <div key={review.id} className="card" style={{ padding: '1.25rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                  <h3 style={{ fontSize: '1.1rem', fontWeight: '600' }}>{review.userName}</h3>
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <span style={{ color: '#FBBF24', marginRight: '0.25rem' }}>★</span>
-                    <span>{review.rating}</span>
-                  </div>
-                </div>
-                <p style={{ color: 'var(--text-muted)', marginBottom: '0.5rem' }}>{review.comment}</p>
-                <p style={{ color: '#9CA3AF', fontSize: '0.875rem' }}>{review.date}</p>
-              </div>
-            ))}
-          </div>
+  const handleStartReading = useCallback(
+    async (type: ReadingType) => {
+      if (!isAuthenticated) {
+        login();
+        return;
+      }
+
+      if (!reader) return;
+
+      // Check balance
+      const pricePerMinute =
+        type === 'chat'
+          ? reader.pricingChat
+          : type === 'voice'
+            ? reader.pricingVoice
+            : reader.pricingVideo;
+
+      if (user && user.accountBalance < pricePerMinute) {
+        addToast('warning', 'Insufficient balance. Please add funds from your dashboard.');
+        navigate('/dashboard');
+        return;
+      }
+
+      setStartingReading(type);
+      try {
+        const reading = await readingsApi.create({ readerId: reader.id, type });
+        navigate(`/reading/${reading.id}`);
+      } catch (err) {
+        addToast('error', err instanceof Error ? err.message : 'Failed to start reading');
+      } finally {
+        setStartingReading(null);
+      }
+    },
+    [reader, isAuthenticated, user, login, navigate, addToast]
+  );
+
+  if (isLoading) {
+    return (
+      <div className="loading-container page-content">
+        <div className="spinner" />
+        <p>Loading reader profile...</p>
+      </div>
+    );
+  }
+
+  if (error || !reader) {
+    return (
+      <div className="page-content page-enter">
+        <div className="container empty-state">
+          <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.8rem' }}>
+            Reader Not Found
+          </h3>
+          <p style={{ marginTop: '8px' }}>{error || 'This reader profile does not exist.'}</p>
+          <button onClick={() => navigate('/readers')} className="btn btn-secondary" style={{ marginTop: '16px' }}>
+            Browse Readers
+          </button>
         </div>
       </div>
+    );
+  }
+
+  const specialtiesArray = reader.specialties
+    ? reader.specialties.split(',').map((s) => s.trim()).filter(Boolean)
+    : [];
+
+  return (
+    <div className="page-content page-enter">
+      <div className="container" style={{ maxWidth: '900px' }}>
+        {/* Profile Header */}
+        <section
+          className="card-static"
+          style={{
+            marginTop: '32px',
+            padding: '32px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            textAlign: 'center',
+            gap: '16px',
+          }}
+        >
+          {reader.profileImage ? (
+            <img
+              src={reader.profileImage}
+              alt={reader.fullName || reader.username || 'Reader'}
+              className="avatar-xl"
+            />
+          ) : (
+            <div
+              className="avatar-xl"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'var(--surface-elevated)',
+                color: 'var(--primary-pink)',
+                fontFamily: 'var(--font-heading)',
+                fontSize: '3rem',
+              }}
+            >
+              {(reader.fullName || reader.username || '?')[0]}
+            </div>
+          )}
+
+          <div>
+            <h1 style={{ fontSize: 'clamp(2rem, 5vw, 3rem)', marginBottom: '4px' }}>
+              {reader.fullName || reader.username || 'Reader'}
+            </h1>
+            <span className={reader.isOnline ? 'badge badge-online' : 'badge badge-offline'}>
+              {reader.isOnline ? 'Online Now' : 'Offline'}
+            </span>
+          </div>
+
+          {/* Rating */}
+          {reviewCount > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <StarDisplay rating={averageRating} />
+              <span style={{ color: 'var(--accent-gold)', fontWeight: 600 }}>
+                {averageRating.toFixed(1)}
+              </span>
+              <span style={{ color: 'var(--text-light-muted)', fontSize: '0.85rem' }}>
+                ({reviewCount} review{reviewCount !== 1 ? 's' : ''})
+              </span>
+            </div>
+          )}
+
+          {/* Specialties */}
+          {specialtiesArray.length > 0 && (
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'center' }}>
+              {specialtiesArray.map((s) => (
+                <span key={s} className="badge badge-gold">
+                  {s}
+                </span>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* Bio */}
+        {reader.bio && (
+          <section className="card-static" style={{ marginTop: '16px', padding: '28px' }}>
+            <h3 style={{ marginBottom: '12px', fontSize: '1.5rem' }}>About</h3>
+            <p style={{ lineHeight: 1.8, whiteSpace: 'pre-line' }}>{reader.bio}</p>
+          </section>
+        )}
+
+        {/* Pricing & Start Reading */}
+        <section className="card-static" style={{ marginTop: '16px', padding: '28px' }}>
+          <h3 style={{ marginBottom: '20px', fontSize: '1.5rem' }}>Reading Options</h3>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gap: '16px',
+            }}
+          >
+            {reader.pricingChat > 0 && (
+              <ReadingOption
+                type="chat"
+                icon="💬"
+                label="Chat Reading"
+                price={reader.pricingChat}
+                isOnline={reader.isOnline}
+                isStarting={startingReading === 'chat'}
+                onStart={() => handleStartReading('chat')}
+              />
+            )}
+            {reader.pricingVoice > 0 && (
+              <ReadingOption
+                type="voice"
+                icon="🎤"
+                label="Voice Reading"
+                price={reader.pricingVoice}
+                isOnline={reader.isOnline}
+                isStarting={startingReading === 'voice'}
+                onStart={() => handleStartReading('voice')}
+              />
+            )}
+            {reader.pricingVideo > 0 && (
+              <ReadingOption
+                type="video"
+                icon="📹"
+                label="Video Reading"
+                price={reader.pricingVideo}
+                isOnline={reader.isOnline}
+                isStarting={startingReading === 'video'}
+                onStart={() => handleStartReading('video')}
+              />
+            )}
+          </div>
+
+          {reader.pricingChat === 0 && reader.pricingVoice === 0 && reader.pricingVideo === 0 && (
+            <p style={{ color: 'var(--text-light-muted)', textAlign: 'center', padding: '20px 0' }}>
+              This reader hasn't set up pricing yet.
+            </p>
+          )}
+        </section>
+
+        {/* Reviews */}
+        <section style={{ marginTop: '16px', paddingBottom: '60px' }}>
+          <h3
+            style={{
+              fontFamily: 'var(--font-heading)',
+              color: 'var(--primary-pink)',
+              fontSize: '1.5rem',
+              marginBottom: '16px',
+            }}
+          >
+            Reviews
+          </h3>
+
+          {reviews.length === 0 ? (
+            <div className="card-static" style={{ textAlign: 'center', padding: '32px' }}>
+              <p style={{ color: 'var(--text-light-muted)' }}>
+                No reviews yet. Be the first to leave one!
+              </p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {reviews.map((review) => (
+                <div key={review.id} className="card-static" style={{ padding: '20px' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      marginBottom: '10px',
+                    }}
+                  >
+                    {review.author?.profileImage ? (
+                      <img
+                        src={review.author.profileImage}
+                        alt=""
+                        className="avatar"
+                        style={{ width: '36px', height: '36px' }}
+                      />
+                    ) : (
+                      <div
+                        className="avatar"
+                        style={{
+                          width: '36px',
+                          height: '36px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          background: 'var(--surface-elevated)',
+                          color: 'var(--primary-pink)',
+                          fontSize: '0.85rem',
+                          fontFamily: 'var(--font-heading)',
+                        }}
+                      >
+                        {(review.author?.fullName || review.author?.username || '?')[0]}
+                      </div>
+                    )}
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>
+                          {review.author?.fullName || review.author?.username || 'Anonymous'}
+                        </span>
+                        <StarDisplay rating={review.rating} />
+                      </div>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-light-muted)' }}>
+                        {new Date(review.createdAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                  </div>
+                  {review.review && (
+                    <p style={{ fontSize: '0.9rem', lineHeight: 1.6 }}>{review.review}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function ReadingOption({
+  icon,
+  label,
+  price,
+  isOnline,
+  isStarting,
+  onStart,
+}: {
+  type: ReadingType;
+  icon: string;
+  label: string;
+  price: number;
+  isOnline: boolean;
+  isStarting: boolean;
+  onStart: () => void;
+}) {
+  return (
+    <div
+      style={{
+        background: 'var(--surface-elevated)',
+        border: '1px solid var(--border-subtle)',
+        borderRadius: 'var(--radius-lg)',
+        padding: '20px',
+        textAlign: 'center',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+        alignItems: 'center',
+      }}
+    >
+      <span style={{ fontSize: '2rem' }}>{icon}</span>
+      <h4 style={{ fontSize: '0.95rem', margin: 0 }}>{label}</h4>
+      <span className="price price-lg">{formatCents(price)}/min</span>
+      <button
+        onClick={onStart}
+        className="btn btn-primary btn-sm"
+        disabled={!isOnline || isStarting}
+        style={{ width: '100%', marginTop: '4px' }}
+      >
+        {isStarting ? 'Starting...' : isOnline ? 'Start Now' : 'Offline'}
+      </button>
     </div>
   );
 }

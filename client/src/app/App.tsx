@@ -1,39 +1,71 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-import { Navigation } from "../components/Navigation";
-import { HomePage } from "../pages/HomePage";
-import { ReadersPage } from "../pages/readers/ReadersPage";
-import { ReaderProfilePage } from "../pages/readers/ReaderProfilePage";
-import { CommunityHubPage } from "../pages/CommunityHubPage";
-import { ReadingSessionPage } from "../pages/ReadingSessionPage";
-import { MessagingPage } from "../pages/MessagingPage";
-import { AboutPage } from "../pages/AboutPage";
-import { ClientDashboard } from "../pages/ClientDashboard";
-import { ReaderDashboard } from "../pages/ReaderDashboard";
-import { LoginPage } from "../pages/LoginPage";
-import { HelpPage } from "../pages/HelpPage";
-import { AdminDashboard } from "../pages/admin/AdminDashboard";
+// ============================================================
+// App — Root component with routing
+// ============================================================
+
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { Navigation } from '../components/Navigation';
+import { ProtectedRoute } from '../components/ProtectedRoute';
+import { ToastProvider } from '../components/ToastProvider';
+import { HomePage } from '../pages/HomePage';
+import { ReadersPage } from '../pages/readers/ReadersPage';
+import { ReaderProfilePage } from '../pages/readers/ReaderProfilePage';
+import { AboutPage } from '../pages/AboutPage';
+import { CommunityHubPage } from '../pages/CommunityHubPage';
+import { LoginPage } from '../pages/LoginPage';
+import { DashboardPage } from '../pages/DashboardPage';
+import { ReadingSessionPage } from '../pages/ReadingSessionPage';
+import { HelpPage } from '../pages/HelpPage';
 
 export function App() {
   return (
     <BrowserRouter>
-      <>
+      <ToastProvider>
         <Navigation />
         <Routes>
+          {/* Public routes */}
           <Route path="/" element={<HomePage />} />
           <Route path="/readers" element={<ReadersPage />} />
           <Route path="/readers/:id" element={<ReaderProfilePage />} />
-          <Route path="/community" element={<CommunityHubPage />} />
           <Route path="/about" element={<AboutPage />} />
-          <Route path="/help" element={<HelpPage />} />
+          <Route path="/community" element={<CommunityHubPage />} />
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/dashboard/client" element={<ClientDashboard />} />
-          <Route path="/dashboard/reader" element={<ReaderDashboard />} />
-          <Route path="/session/:sessionId" element={<ReadingSessionPage />} />
-          <Route path="/messages" element={<MessagingPage />} />
-          <Route path="/admin" element={<AdminDashboard />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="/help" element={<HelpPage />} />
+
+          {/* Authenticated routes */}
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <DashboardPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/reading/:id"
+            element={
+              <ProtectedRoute>
+                <ReadingSessionPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Catch-all → Home */}
+          <Route
+            path="*"
+            element={
+              <div className="page-content page-enter">
+                <div className="container empty-state" style={{ paddingTop: '80px' }}>
+                  <h1 style={{ fontSize: '3rem', marginBottom: '12px' }}>404</h1>
+                  <p style={{ fontSize: '1rem' }}>This page doesn't exist.</p>
+                  <a href="/" className="btn btn-primary" style={{ marginTop: '20px' }}>
+                    Go Home
+                  </a>
+                </div>
+              </div>
+            }
+          />
         </Routes>
-      </>
+      </ToastProvider>
     </BrowserRouter>
   );
 }

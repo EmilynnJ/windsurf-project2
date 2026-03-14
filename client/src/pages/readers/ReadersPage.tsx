@@ -1,241 +1,292 @@
-import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+// ============================================================
+// ReadersPage — Browse all readers with filters
+// ============================================================
 
-interface Reader {
-  id: number;
-  name: string;
-  specialty: string;
-  rating: number;
-  online: boolean;
-  avatar: string;
-  experience: string;
-  languages: string[];
-  price: string;
+import { useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
+import { useReaders } from '../../hooks/useReaders';
+import type { ReaderPublic, ReadingType } from '../../types';
+
+function formatCents(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`;
 }
 
-// Mock data for all readers
-const mockAllReaders: Reader[] = [
-  { id: 1, name: 'Luna Starweaver', specialty: 'Tarot & Spirituality', rating: 4.9, online: true, avatar: '🌟', experience: '10 years', languages: ['English', 'Spanish'], price: '$2.99/min' },
-  { id: 2, name: 'Phoenix Mystique', specialty: 'Psychic Readings', rating: 4.8, online: true, avatar: '🔮', experience: '8 years', languages: ['English'], price: '$3.49/min' },
-  { id: 3, name: 'Oracle Moonchild', specialty: 'Clairvoyance', rating: 4.7, online: true, avatar: '🌙', experience: '12 years', languages: ['English', 'French'], price: '$2.49/min' },
-  { id: 4, name: 'Cosmic Sage', specialty: 'Astrology', rating: 4.9, online: false, avatar: '⭐', experience: '15 years', languages: ['English', 'German'], price: '$3.99/min' },
-  { id: 5, name: 'Seraphina Lightbringer', specialty: 'Angel Cards', rating: 4.6, online: true, avatar: '👼', experience: '7 years', languages: ['English'], price: '$2.79/min' },
-  { id: 6, name: 'Mystic Willow', specialty: 'Palm Reading', rating: 4.8, online: false, avatar: '🍃', experience: '9 years', languages: ['English', 'Italian'], price: '$3.29/min' },
-  { id: 7, name: 'Aurora Seeress', specialty: 'Mediumship', rating: 4.9, online: true, avatar: '🌈', experience: '11 years', languages: ['English', 'Portuguese'], price: '$4.49/min' },
-  { id: 8, name: 'Stellar Prophet', specialty: 'Numerology', rating: 4.5, online: false, avatar: '✨', experience: '6 years', languages: ['English'], price: '$2.29/min' },
-  { id: 9, name: 'Celestial Guide', specialty: 'Energy Healing', rating: 4.7, online: true, avatar: '💫', experience: '13 years', languages: ['English', 'Spanish'], price: '$3.79/min' },
+const SPECIALTIES = [
+  'Tarot',
+  'Mediumship',
+  'Clairvoyance',
+  'Astrology',
+  'Energy Healing',
+  'Love & Relationships',
+  'Career',
+  'Spiritual Coaching',
 ];
 
-export function ReadersPage() {
-  const [readers, setReaders] = useState<Reader[]>(mockAllReaders);
-  const [filteredReaders, setFilteredReaders] = useState<Reader[]>(mockAllReaders);
-  const [specialties] = useState<string[]>(['All', 'Tarot', 'Psychic', 'Clairvoyance', 'Astrology', 'Angel Cards', 'Palm Reading', 'Mediumship', 'Numerology', 'Energy Healing']);
-  const [selectedSpecialty, setSelectedSpecialty] = useState<string>('All');
-  const [searchTerm, setSearchTerm] = useState<string>('');
-  const [showOnlineOnly, setShowOnlineOnly] = useState<boolean>(false);
+type FilterType = ReadingType | 'all';
+type OnlineFilter = 'all' | 'online' | 'offline';
 
-  useEffect(() => {
-    let result = [...readers];
-    
-    // Filter by specialty
-    if (selectedSpecialty !== 'All') {
-      result = result.filter(reader => 
-        reader.specialty.toLowerCase().includes(selectedSpecialty.toLowerCase())
-      );
-    }
-    
-    // Filter by search term
-    if (searchTerm) {
-      result = result.filter(reader => 
-        reader.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        reader.specialty.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-    
-    // Filter by online status
-    if (showOnlineOnly) {
-      result = result.filter(reader => reader.online);
-    }
-    
-    setFilteredReaders(result);
-  }, [readers, selectedSpecialty, searchTerm, showOnlineOnly]);
+function ReaderListCard({ reader }: { reader: ReaderPublic }) {
+  const specialtiesArray = reader.specialties
+    ? reader.specialties.split(',').map((s) => s.trim()).filter(Boolean)
+    : [];
+
+  const bioExcerpt = reader.bio
+    ? reader.bio.length > 120
+      ? reader.bio.substring(0, 120) + '...'
+      : reader.bio
+    : null;
 
   return (
-    <div className="readers-page" style={{
-      fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen, Ubuntu, Cantarell, Open Sans, Helvetica Neue, sans-serif',
-      padding: '2rem 0'
-    }}>
-      <div className="container" style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 20px' }}>
-        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <h1 style={{ fontSize: 'clamp(1.75rem, 5vw, 2.5rem)', fontWeight: 'bold', marginBottom: '0.5rem' }}>Find Your Psychic Reader</h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '1.1rem' }}>
-            Connect with our talented community of spiritual advisors
-          </p>
-        </div>
-
-        {/* Filters Section */}
-        <div className="filters-section card" style={{ padding: '1.5rem', marginBottom: '2rem' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-              <input
-                type="text"
-                placeholder="Search readers..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                style={{
-                  flex: 1,
-                  padding: '0.75rem 1rem',
-                  borderRadius: 'var(--border-radius)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  backgroundColor: 'rgba(30, 30, 46, 0.5)',
-                  color: 'white',
-                  minWidth: '200px'
-                }}
-              />
-              
-              <select
-                value={selectedSpecialty}
-                onChange={(e) => setSelectedSpecialty(e.target.value)}
-                style={{
-                  padding: '0.75rem 1rem',
-                  borderRadius: 'var(--border-radius)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  backgroundColor: 'rgba(30, 30, 46, 0.5)',
-                  color: 'white'
-                }}
-              >
-                {specialties.map((specialty: string) => (
-                  <option key={specialty} value={specialty}>{specialty}</option>
-                ))}
-              </select>
+    <Link to={`/readers/${reader.id}`} style={{ textDecoration: 'none' }}>
+      <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '14px', height: '100%' }}>
+        {/* Top: avatar + name */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          {reader.profileImage ? (
+            <img
+              src={reader.profileImage}
+              alt={reader.fullName || reader.username || 'Reader'}
+              className="avatar-lg"
+              style={{ flexShrink: 0 }}
+            />
+          ) : (
+            <div
+              className="avatar-lg"
+              style={{
+                flexShrink: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'var(--surface-elevated)',
+                color: 'var(--primary-pink)',
+                fontFamily: 'var(--font-heading)',
+                fontSize: '2rem',
+              }}
+            >
+              {(reader.fullName || reader.username || '?')[0]}
             </div>
-            
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <input
-                type="checkbox"
-                id="online-only"
-                checked={showOnlineOnly}
-                onChange={(e) => setShowOnlineOnly(e.target.checked)}
-                style={{ width: '1rem', height: '1rem' }}
-              />
-              <label htmlFor="online-only" style={{ color: 'var(--text-muted)' }}>
-                Show online readers only
-              </label>
+          )}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <h4 style={{ fontSize: '1rem', margin: 0 }}>
+                {reader.fullName || reader.username || 'Reader'}
+              </h4>
+              <span className={reader.isOnline ? 'badge badge-online' : 'badge badge-offline'}>
+                {reader.isOnline ? 'Online' : 'Offline'}
+              </span>
             </div>
           </div>
         </div>
 
-        {/* Results Count */}
-        <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <p style={{ color: 'var(--text-muted)' }}>
-            Showing <strong>{filteredReaders.length}</strong> of <strong>{readers.length}</strong> readers
+        {/* Bio excerpt */}
+        {bioExcerpt && (
+          <p style={{ fontSize: '0.85rem', lineHeight: 1.6, margin: 0, color: 'var(--text-light-muted)' }}>
+            {bioExcerpt}
           </p>
-          <div style={{ color: 'var(--text-muted)' }}>
-            {showOnlineOnly && (
-              <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                <span style={{ width: '8px', height: '8px', backgroundColor: '#10B981', borderRadius: '50%', marginRight: '0.5rem' }}></span>
-                Online Only
+        )}
+
+        {/* Specialties */}
+        {specialtiesArray.length > 0 && (
+          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+            {specialtiesArray.slice(0, 4).map((s) => (
+              <span key={s} className="badge badge-gold" style={{ fontSize: '0.6rem' }}>
+                {s}
+              </span>
+            ))}
+            {specialtiesArray.length > 4 && (
+              <span className="badge badge-gold" style={{ fontSize: '0.6rem' }}>
+                +{specialtiesArray.length - 4}
               </span>
             )}
           </div>
-        </div>
+        )}
 
-        {/* Readers Grid */}
-        <div style={{ 
-          display: 'grid', 
-          gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', 
-          gap: '1.5rem' 
-        }}>
-          {filteredReaders.map((reader: Reader) => (
-            <div key={reader.id} className="card" style={{ 
-              padding: '1.5rem', 
-              transition: 'all 0.3s ease',
-              cursor: 'pointer'
-            }} onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-5px)';
-            }} onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0)';
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem' }}>
-                <div style={{ fontSize: '2.5rem', marginRight: '1rem' }}>{reader.avatar}</div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h3 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '0.25rem' }}>{reader.name}</h3>
-                    {reader.online ? (
-                      <span style={{ 
-                        display: 'inline-flex', 
-                        alignItems: 'center', 
-                        fontSize: '0.875rem',
-                        color: '#10B981'
-                      }}>
-                        <span style={{ width: '8px', height: '8px', backgroundColor: '#10B981', borderRadius: '50%', marginRight: '0.5rem', animation: 'pulse 1.5s infinite' }}></span>
-                        Online
-                      </span>
-                    ) : (
-                      <span style={{ fontSize: '0.875rem', color: '#9CA3AF' }}>Offline</span>
-                    )}
-                  </div>
-                  <p style={{ color: 'var(--text-muted)', marginBottom: '0.25rem' }}>{reader.specialty}</p>
-                  
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
-                    <span style={{ color: '#FBBF24' }}>★</span>
-                    <span style={{ fontSize: '0.875rem' }}>{reader.rating} ({Math.floor(Math.random() * 100) + 50} reviews)</span>
-                  </div>
-                </div>
-              </div>
-              
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1rem' }}>
-                <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-                  <div>{reader.experience} experience</div>
-                  <div>Price: {reader.price}</div>
-                </div>
-              </div>
-              
-              <div style={{ marginTop: '1rem' }}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginBottom: '1rem' }}>
-                  {reader.languages.map((lang: string, idx: number) => (
-                    <span 
-                      key={idx} 
-                      style={{ 
-                        backgroundColor: 'rgba(139, 92, 246, 0.2)', 
-                        color: 'var(--secondary-purple)',
-                        padding: '0.25rem 0.5rem', 
-                        borderRadius: '12px', 
-                        fontSize: '0.75rem' 
-                      }}
-                    >
-                      {lang}
-                    </span>
-                  ))}
-                </div>
-                
-                <div style={{ display: 'flex', gap: '0.75rem' }}>
-                  <Link 
-                    to={`/readers/${reader.id}`} 
-                    className="btn btn-outline" 
-                    style={{ flex: 1, padding: '0.75rem', fontSize: '0.875rem' }}
-                  >
-                    View Profile
-                  </Link>
-                  <button 
-                    className={`btn ${reader.online ? 'btn-primary' : 'btn-outline'}`} 
-                    style={{ flex: 1, padding: '0.75rem', fontSize: '0.875rem' }}
-                    disabled={!reader.online}
-                  >
-                    {reader.online ? 'Chat Now' : 'Unavailable'}
-                  </button>
-                </div>
-              </div>
+        {/* Pricing */}
+        <div
+          style={{
+            display: 'flex',
+            gap: '16px',
+            flexWrap: 'wrap',
+            marginTop: 'auto',
+            paddingTop: '8px',
+            borderTop: '1px solid var(--border-subtle)',
+          }}
+        >
+          {reader.pricingChat > 0 && (
+            <div style={{ fontSize: '0.8rem' }}>
+              <span style={{ color: 'var(--text-light-muted)' }}>💬 Chat </span>
+              <span className="price">{formatCents(reader.pricingChat)}/min</span>
             </div>
-          ))}
+          )}
+          {reader.pricingVoice > 0 && (
+            <div style={{ fontSize: '0.8rem' }}>
+              <span style={{ color: 'var(--text-light-muted)' }}>🎤 Voice </span>
+              <span className="price">{formatCents(reader.pricingVoice)}/min</span>
+            </div>
+          )}
+          {reader.pricingVideo > 0 && (
+            <div style={{ fontSize: '0.8rem' }}>
+              <span style={{ color: 'var(--text-light-muted)' }}>📹 Video </span>
+              <span className="price">{formatCents(reader.pricingVideo)}/min</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+export function ReadersPage() {
+  const { readers, isLoading, error } = useReaders({ pollInterval: 30000 });
+  const [specialtyFilter, setSpecialtyFilter] = useState('');
+  const [typeFilter, setTypeFilter] = useState<FilterType>('all');
+  const [onlineFilter, setOnlineFilter] = useState<OnlineFilter>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const filteredReaders = useMemo(() => {
+    let result = [...readers];
+
+    // Online filter
+    if (onlineFilter === 'online') result = result.filter((r) => r.isOnline);
+    if (onlineFilter === 'offline') result = result.filter((r) => !r.isOnline);
+
+    // Specialty filter
+    if (specialtyFilter) {
+      result = result.filter(
+        (r) => r.specialties?.toLowerCase().includes(specialtyFilter.toLowerCase())
+      );
+    }
+
+    // Type filter
+    if (typeFilter !== 'all') {
+      result = result.filter((r) => {
+        if (typeFilter === 'chat') return r.pricingChat > 0;
+        if (typeFilter === 'voice') return r.pricingVoice > 0;
+        if (typeFilter === 'video') return r.pricingVideo > 0;
+        return true;
+      });
+    }
+
+    // Search
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(
+        (r) =>
+          (r.fullName || '').toLowerCase().includes(q) ||
+          (r.username || '').toLowerCase().includes(q) ||
+          (r.bio || '').toLowerCase().includes(q) ||
+          (r.specialties || '').toLowerCase().includes(q)
+      );
+    }
+
+    // Sort: online first
+    result.sort((a, b) => {
+      if (a.isOnline === b.isOnline) return 0;
+      return a.isOnline ? -1 : 1;
+    });
+
+    return result;
+  }, [readers, specialtyFilter, typeFilter, onlineFilter, searchQuery]);
+
+  return (
+    <div className="page-content page-enter">
+      <div className="container">
+        <section style={{ textAlign: 'center', padding: '40px 0 24px' }}>
+          <h1>Our Readers</h1>
+          <p style={{ marginTop: '8px' }}>
+            Find a gifted psychic who resonates with your soul.
+          </p>
+        </section>
+
+        {/* Filters */}
+        <div
+          style={{
+            display: 'flex',
+            gap: '12px',
+            flexWrap: 'wrap',
+            marginBottom: '28px',
+            alignItems: 'center',
+          }}
+        >
+          <input
+            type="text"
+            placeholder="Search readers..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{ flex: '1 1 220px', minWidth: '200px' }}
+            aria-label="Search readers"
+          />
+
+          <select
+            value={specialtyFilter}
+            onChange={(e) => setSpecialtyFilter(e.target.value)}
+            style={{ flex: '0 1 180px' }}
+            aria-label="Filter by specialty"
+          >
+            <option value="">All Specialties</option>
+            {SPECIALTIES.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+
+          <select
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value as FilterType)}
+            style={{ flex: '0 1 150px' }}
+            aria-label="Filter by reading type"
+          >
+            <option value="all">All Types</option>
+            <option value="chat">💬 Chat</option>
+            <option value="voice">🎤 Voice</option>
+            <option value="video">📹 Video</option>
+          </select>
+
+          <select
+            value={onlineFilter}
+            onChange={(e) => setOnlineFilter(e.target.value as OnlineFilter)}
+            style={{ flex: '0 1 140px' }}
+            aria-label="Filter by availability"
+          >
+            <option value="all">All Status</option>
+            <option value="online">🟢 Online</option>
+            <option value="offline">⚫ Offline</option>
+          </select>
         </div>
 
-        {filteredReaders.length === 0 && (
-          <div className="card" style={{ padding: '2rem', textAlign: 'center', marginTop: '2rem' }}>
-            <h3 style={{ marginBottom: '0.5rem' }}>No readers found</h3>
-            <p style={{ color: 'var(--text-muted)' }}>
-              Try adjusting your filters or search terms
+        {/* Reader count */}
+        <p
+          style={{
+            fontSize: '0.85rem',
+            color: 'var(--text-light-muted)',
+            marginBottom: '16px',
+          }}
+        >
+          {filteredReaders.length} reader{filteredReaders.length !== 1 ? 's' : ''} found
+          {onlineFilter === 'online' && ' online'}
+        </p>
+
+        {/* Results */}
+        {isLoading ? (
+          <div className="loading-container">
+            <div className="spinner" />
+            <p>Loading readers...</p>
+          </div>
+        ) : error ? (
+          <div className="empty-state">
+            <p>Unable to load readers. Please try again.</p>
+            <p style={{ fontSize: '0.85rem', marginTop: '8px', color: 'var(--text-light-muted)' }}>
+              {error}
             </p>
+          </div>
+        ) : filteredReaders.length === 0 ? (
+          <div className="empty-state">
+            <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.8rem' }}>No Readers Found</h3>
+            <p style={{ marginTop: '8px' }}>Try adjusting your filters or search query.</p>
+          </div>
+        ) : (
+          <div className="grid grid-readers">
+            {filteredReaders.map((reader) => (
+              <ReaderListCard key={reader.id} reader={reader} />
+            ))}
           </div>
         )}
       </div>

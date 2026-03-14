@@ -1,212 +1,366 @@
-import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+// ============================================================
+// HomePage — Landing page with hero, online readers, newsletter
+// ============================================================
 
-// Mock data for online readers
-const mockOnlineReaders = [
-  { id: 1, name: 'Luna Starweaver', specialty: 'Tarot & Spirituality', rating: 4.9, online: true, avatar: '🌟' },
-  { id: 2, name: 'Phoenix Mystique', specialty: 'Psychic Readings', rating: 4.8, online: true, avatar: '🔮' },
-  { id: 3, name: 'Oracle Moonchild', specialty: 'Clairvoyance', rating: 4.7, online: true, avatar: '🌙' },
-  { id: 4, name: 'Cosmic Sage', specialty: 'Astrology', rating: 4.9, online: true, avatar: '⭐' },
-  { id: 5, name: 'Seraphina Lightbringer', specialty: 'Angel Cards', rating: 4.6, online: true, avatar: '👼' },
-  { id: 6, name: 'Mystic Willow', specialty: 'Palm Reading', rating: 4.8, online: true, avatar: '🍃' },
-];
+import { useState, useCallback } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
+import { useReaders } from '../hooks/useReaders';
+import { useToast } from '../components/ToastProvider';
+import type { ReaderPublic, ReadingType } from '../types';
 
-export function HomePage() {
-  const [onlineReaders, setOnlineReaders] = useState(mockOnlineReaders);
-  const [featuredReaders, setFeaturedReaders] = useState([]);
+function formatCentsToPrice(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`;
+}
 
-  useEffect(() => {
-    // In a real app, this would fetch from an API
-    setFeaturedReaders(mockOnlineReaders.slice(0, 3));
-  }, []);
+function ReaderCard({ reader }: { reader: ReaderPublic }) {
+  const { isAuthenticated } = useAuth();
+  const navigate = useNavigate();
+
+  const handleStartReading = () => {
+    if (!isAuthenticated) {
+      navigate('/login');
+      return;
+    }
+    navigate(`/readers/${reader.id}`);
+  };
+
+  const specialtiesArray = reader.specialties
+    ? reader.specialties.split(',').map((s) => s.trim()).filter(Boolean)
+    : [];
+
+  const availableTypes: ReadingType[] = [];
+  if (reader.pricingChat > 0) availableTypes.push('chat');
+  if (reader.pricingVoice > 0) availableTypes.push('voice');
+  if (reader.pricingVideo > 0) availableTypes.push('video');
 
   return (
-    <div className="home-page" style={{
-      fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen, Ubuntu, Cantarell, Open Sans, Helvetica Neue, sans-serif'
-    }}>
-      {/* Hero Section */}
-      <section className="hero-section" style={{
-        padding: '4rem 0',
+    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+        {reader.profileImage ? (
+          <img
+            src={reader.profileImage}
+            alt={reader.fullName || reader.username || 'Reader'}
+            className="avatar-lg"
+            style={{ flexShrink: 0 }}
+          />
+        ) : (
+          <div
+            className="avatar-lg"
+            style={{
+              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'var(--surface-elevated)',
+              color: 'var(--primary-pink)',
+              fontFamily: 'var(--font-heading)',
+              fontSize: '2rem',
+            }}
+          >
+            {(reader.fullName || reader.username || '?')[0]}
+          </div>
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <h4 style={{ fontSize: '1.05rem', margin: 0 }}>
+              {reader.fullName || reader.username || 'Reader'}
+            </h4>
+            <span className={reader.isOnline ? 'badge badge-online' : 'badge badge-offline'}>
+              {reader.isOnline ? 'Online' : 'Offline'}
+            </span>
+          </div>
+          {specialtiesArray.length > 0 && (
+            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '6px' }}>
+              {specialtiesArray.slice(0, 3).map((s) => (
+                <span key={s} className="badge badge-gold" style={{ fontSize: '0.65rem' }}>
+                  {s}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Pricing */}
+      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+        {reader.pricingChat > 0 && (
+          <PriceTag type="Chat" price={reader.pricingChat} />
+        )}
+        {reader.pricingVoice > 0 && (
+          <PriceTag type="Voice" price={reader.pricingVoice} />
+        )}
+        {reader.pricingVideo > 0 && (
+          <PriceTag type="Video" price={reader.pricingVideo} />
+        )}
+      </div>
+
+      {/* Reading types available */}
+      {availableTypes.length > 0 && (
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          {availableTypes.map((type) => (
+            <span
+              key={type}
+              className="badge badge-pink"
+              style={{ fontSize: '0.65rem', textTransform: 'capitalize' }}
+            >
+              {type === 'chat' ? '💬' : type === 'voice' ? '🎤' : '📹'} {type}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <button
+        onClick={handleStartReading}
+        className="btn btn-primary btn-sm"
+        style={{ width: '100%', marginTop: 'auto' }}
+      >
+        {reader.isOnline ? 'Start Reading' : 'View Profile'}
+      </button>
+    </div>
+  );
+}
+
+function PriceTag({ type, price }: { type: string; price: number }) {
+  return (
+    <div
+      style={{
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'center',
-        textAlign: 'center',
-        minHeight: '70vh',
-        flexDirection: 'column'
-      }}>
-        <div className="container" style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 20px' }}>
-          <h1 className="gradient-text" style={{ fontSize: 'clamp(2rem, 8vw, 4rem)', fontWeight: 'bold', marginBottom: '1.5rem' }}>SoulSeer</h1>
-          <p style={{ 
-            fontSize: 'clamp(1.25rem, 2.5vw, 1.5rem)', 
-            color: 'var(--text-muted)', 
-            marginBottom: '2rem', 
-            maxWidth: '600px', 
-            margin: '0 auto 2rem',
-            lineHeight: '1.6'
-          }}>
-            Connect with gifted psychics and spiritual guides for transformative readings
-          </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', alignItems: 'center' }}>
-            <Link to="/readers" className="btn btn-primary" style={{ fontSize: '1.125rem', padding: '1rem 2rem' }}>
-              Find a Psychic
-            </Link>
-            <Link to="/community" className="btn btn-outline" style={{ fontSize: '1.125rem', padding: '1rem 2rem' }}>
-              Join Community
-            </Link>
-          </div>
+        gap: '4px',
+        fontSize: '0.8rem',
+        fontFamily: 'var(--font-body)',
+      }}
+    >
+      <span style={{ color: 'var(--text-light-muted)' }}>{type}:</span>
+      <span className="price">{formatCentsToPrice(price)}/min</span>
+    </div>
+  );
+}
+
+export function HomePage() {
+  const { readers, isLoading, error } = useReaders({ onlineOnly: true, pollInterval: 30000 });
+  const [email, setEmail] = useState('');
+  const [subscribed, setSubscribed] = useState(false);
+  const { addToast } = useToast();
+
+  const handleNewsletter = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!email.trim()) return;
+      // In production this would call a newsletter API
+      setSubscribed(true);
+      addToast('success', 'Thanks for subscribing! ✨');
+      setEmail('');
+    },
+    [email, addToast]
+  );
+
+  return (
+    <div className="page-content page-enter">
+      {/* Hero Section */}
+      <section style={{ textAlign: 'center', padding: '40px 20px 20px' }}>
+        <h1
+          style={{
+            fontFamily: 'var(--font-heading)',
+            color: 'var(--primary-pink)',
+            fontSize: 'clamp(3rem, 8vw, 5.5rem)',
+            marginBottom: '24px',
+            textShadow: '0 0 40px rgba(255, 105, 180, 0.3)',
+          }}
+        >
+          SoulSeer
+        </h1>
+
+        {/* Hero Image */}
+        <div
+          style={{
+            maxWidth: '900px',
+            margin: '0 auto 28px',
+            borderRadius: 'var(--radius-xl)',
+            overflow: 'hidden',
+            border: '1px solid var(--border-gold)',
+            boxShadow: '0 8px 40px rgba(212, 175, 55, 0.15)',
+          }}
+        >
+          <img
+            src="https://i.postimg.cc/tRLSgCPb/HERO-IMAGE-1.jpg"
+            alt="SoulSeer — spiritual guidance and psychic readings"
+            style={{ width: '100%', height: 'auto', display: 'block' }}
+            loading="eager"
+          />
         </div>
+
+        <p
+          style={{
+            fontFamily: 'var(--font-body)',
+            fontSize: 'clamp(1.1rem, 2.5vw, 1.5rem)',
+            color: 'var(--text-light)',
+            fontWeight: 500,
+            fontStyle: 'italic',
+            marginBottom: '8px',
+          }}
+        >
+          A Community of Gifted Psychics
+        </p>
       </section>
 
       {/* Online Readers Section */}
-      <section className="online-readers-section" style={{ padding: '3rem 0', backgroundColor: 'rgba(15, 15, 31, 0.2)' }}>
-        <div className="container" style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-            <h2 style={{ fontSize: 'clamp(1.5rem, 4vw, 2rem)', fontWeight: 'bold' }}>Available Psychics</h2>
-            <span style={{ color: 'var(--accent-gold)', display: 'flex', alignItems: 'center' }}>
-              <span style={{ width: '12px', height: '12px', backgroundColor: '#10B981', borderRadius: '50%', marginRight: '0.5rem', animation: 'pulse 1.5s infinite' }}></span>
-              {onlineReaders.length} Online Now
-            </span>
-          </div>
-          
-          <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', 
-            gap: '1.5rem' 
-          }}>
-            {onlineReaders.map(reader => (
-              <div key={reader.id} className="card" style={{ 
-                padding: '1.5rem', 
-                transition: 'all 0.3s ease',
-                cursor: 'pointer'
-              }} onMouseEnter={(e) => {
-                e.currentTarget.style.transform = 'scale(1.03)';
-              }} onMouseLeave={(e) => {
-                e.currentTarget.style.transform = 'scale(1)';
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem' }}>
-                  <div style={{ fontSize: '2.5rem', marginRight: '1rem' }}>{reader.avatar}</div>
-                  <div style={{ flex: 1 }}>
-                    <h3 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '0.25rem' }}>{reader.name}</h3>
-                    <p style={{ color: 'var(--text-muted)' }}>{reader.specialty}</p>
-                  </div>
-                  <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>
-                    <span style={{ color: '#FBBF24', marginRight: '0.25rem' }}>★</span>
-                    <span>{reader.rating}</span>
-                  </div>
-                </div>
-                
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1.5rem' }}>
-                  <button className="btn btn-outline" style={{ flex: 1, marginRight: '0.75rem' }}>
-                    View Profile
-                  </button>
-                  <button className="btn btn-primary" style={{ flex: 1, backgroundColor: '#10B981', border: 'none' }}>
-                    Chat Now
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-          
-          <div style={{ textAlign: 'center', marginTop: '2rem' }}>
-            <Link to="/readers" className="btn btn-outline">
-              Browse All Psychics ({mockOnlineReaders.length})
-            </Link>
-          </div>
+      <section className="section" style={{ paddingTop: '32px' }}>
+        <div className="container">
+          <h2
+            style={{
+              textAlign: 'center',
+              marginBottom: '32px',
+            }}
+          >
+            Readers Online Now
+          </h2>
+
+          {isLoading ? (
+            <div className="loading-container">
+              <div className="spinner" />
+              <p>Finding available readers...</p>
+            </div>
+          ) : error ? (
+            <div className="empty-state">
+              <p>Unable to load readers right now.</p>
+              <p style={{ fontSize: '0.85rem', marginTop: '8px' }}>{error}</p>
+            </div>
+          ) : readers.length === 0 ? (
+            <div className="empty-state">
+              <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.8rem' }}>
+                No Readers Online
+              </h3>
+              <p style={{ marginTop: '8px' }}>
+                Check back soon or{' '}
+                <Link to="/readers" style={{ color: 'var(--primary-pink)' }}>
+                  browse all readers
+                </Link>
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-readers">
+              {readers.slice(0, 6).map((reader) => (
+                <ReaderCard key={reader.id} reader={reader} />
+              ))}
+            </div>
+          )}
+
+          {readers.length > 6 && (
+            <div style={{ textAlign: 'center', marginTop: '32px' }}>
+              <Link to="/readers" className="btn btn-secondary">
+                View All Readers
+              </Link>
+            </div>
+          )}
         </div>
       </section>
 
-      {/* Featured Readers */}
-      <section className="featured-readers-section" style={{ padding: '3rem 0' }}>
-        <div className="container" style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 20px' }}>
-          <h2 style={{ fontSize: 'clamp(1.5rem, 4vw, 2rem)', fontWeight: 'bold', marginBottom: '2rem', textAlign: 'center' }}>Featured Psychics</h2>
-          
-          <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', 
-            gap: '1.5rem' 
-          }}>
-            {featuredReaders.map(reader => (
-              <div key={reader.id} className="card" style={{ padding: '1.5rem', textAlign: 'center' }}>
-                <div style={{ fontSize: '3rem', margin: '0 auto 1rem' }}>{reader.avatar}</div>
-                <h3 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '0.5rem' }}>{reader.name}</h3>
-                <p style={{ color: 'var(--text-muted)', marginBottom: '1rem' }}>{reader.specialty}</p>
-                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: '1rem' }}>
-                  <span style={{ color: '#FBBF24', marginRight: '0.25rem' }}>★</span>
-                  <span>{reader.rating} Rating</span>
-                </div>
-                <button className="btn btn-primary" style={{ width: '100%' }}>
-                  Book Reading
+      <div className="divider container" />
+
+      {/* Newsletter Section */}
+      <section className="section" style={{ paddingTop: '16px' }}>
+        <div className="container" style={{ maxWidth: '600px' }}>
+          <h2 style={{ textAlign: 'center', marginBottom: '12px' }}>Stay Connected</h2>
+          <p style={{ textAlign: 'center', marginBottom: '24px' }}>
+            Get spiritual insights and updates delivered to your inbox.
+          </p>
+
+          {subscribed ? (
+            <div
+              className="card-static"
+              style={{ textAlign: 'center', padding: '24px', background: 'rgba(34, 197, 94, 0.08)' }}
+            >
+              <p style={{ color: '#86EFAC', fontWeight: 600 }}>
+                ✨ You're subscribed! Watch your inbox for cosmic updates.
+              </p>
+            </div>
+          ) : (
+            <form
+              onSubmit={handleNewsletter}
+              style={{
+                display: 'flex',
+                gap: '12px',
+                flexDirection: 'column',
+              }}
+            >
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <input
+                  type="email"
+                  placeholder="Enter your email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  style={{ flex: 1 }}
+                  aria-label="Email address for newsletter"
+                />
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  style={{ flexShrink: 0 }}
+                >
+                  Subscribe
                 </button>
               </div>
-            ))}
-          </div>
+            </form>
+          )}
         </div>
       </section>
 
-      {/* Community Hub Preview */}
-      <section className="community-section" style={{ padding: '3rem 0', backgroundColor: 'rgba(15, 15, 31, 0.2)' }}>
-        <div className="container" style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 20px' }}>
-          <h2 style={{ fontSize: 'clamp(1.5rem, 4vw, 2rem)', fontWeight: 'bold', marginBottom: '2rem', textAlign: 'center' }}>Spiritual Community</h2>
-          
-          <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', 
-            gap: '1.5rem' 
-          }}>
-            <div className="card" style={{ padding: '1.5rem', textAlign: 'center' }}>
-              <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>👥</div>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '0.5rem' }}>Community Forums</h3>
-              <p style={{ color: 'var(--text-muted)', marginBottom: '1rem' }}>Connect with like-minded souls and share experiences</p>
-              <Link to="/community" className="btn btn-outline">
-                Join Discussion
-              </Link>
-            </div>
-            
-            <div className="card" style={{ padding: '1.5rem', textAlign: 'center' }}>
-              <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>🎓</div>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '0.5rem' }}>Workshops & Events</h3>
-              <p style={{ color: 'var(--text-muted)', marginBottom: '1rem' }}>Participate in spiritual growth events</p>
-              <Link to="/events" className="btn btn-outline">
-                View Events
-              </Link>
-            </div>
-            
-            <div className="card" style={{ padding: '1.5rem', textAlign: 'center' }}>
-              <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>📚</div>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '0.5rem' }}>Resources</h3>
-              <p style={{ color: 'var(--text-muted)', marginBottom: '1rem' }}>Guides and articles for spiritual development</p>
-              <Link to="/resources" className="btn btn-outline">
-                Explore
-              </Link>
-            </div>
-          </div>
-        </div>
-      </section>
+      <div className="divider container" />
 
-      {/* CTA Section */}
-      <section className="cta-section" style={{ padding: '4rem 0', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
-        <div className="container" style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 20px' }}>
-          <h2 style={{ fontSize: 'clamp(1.75rem, 5vw, 2.5rem)', fontWeight: 'bold', marginBottom: '1.5rem' }}>Begin Your Spiritual Journey</h2>
-          <p style={{ 
-            fontSize: 'clamp(1.125rem, 2vw, 1.25rem)', 
-            color: 'var(--text-muted)', 
-            marginBottom: '2rem', 
-            maxWidth: '600px', 
-            margin: '0 auto 2rem',
-            lineHeight: '1.6'
-          }}>
-            Connect with our community of gifted psychics and discover insights that will illuminate your path
+      {/* Community Links Section */}
+      <section className="section" style={{ paddingTop: '16px' }}>
+        <div className="container" style={{ maxWidth: '600px', textAlign: 'center' }}>
+          <h2 style={{ marginBottom: '12px' }}>Join Our Community</h2>
+          <p style={{ marginBottom: '24px' }}>
+            Connect with fellow seekers and gifted readers in our growing community.
           </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', alignItems: 'center' }}>
-            <Link to="/signup" className="btn btn-primary" style={{ fontSize: '1.125rem', padding: '1rem 2rem' }}>
-              Create Account
-            </Link>
-            <Link to="/readers" className="btn btn-outline" style={{ fontSize: '1.125rem', padding: '1rem 2rem' }}>
-              Browse Psychics
-            </Link>
+          <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', flexWrap: 'wrap' }}>
+            <a
+              href="https://www.facebook.com/groups/soulseer"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-secondary"
+            >
+              Facebook Group
+            </a>
+            <a
+              href="https://discord.gg/soulseer"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-secondary"
+            >
+              Discord Server
+            </a>
           </div>
         </div>
       </section>
+
+      {/* Footer */}
+      <footer
+        style={{
+          textAlign: 'center',
+          padding: '32px 20px',
+          borderTop: '1px solid var(--border-subtle)',
+          marginTop: '40px',
+        }}
+      >
+        <p
+          style={{
+            fontFamily: 'var(--font-heading)',
+            color: 'var(--primary-pink)',
+            fontSize: '1.5rem',
+            marginBottom: '8px',
+          }}
+        >
+          SoulSeer
+        </p>
+        <p style={{ fontSize: '0.8rem', color: 'var(--text-light-muted)' }}>
+          © {new Date().getFullYear()} SoulSeer. All rights reserved.
+        </p>
+      </footer>
     </div>
   );
 }
