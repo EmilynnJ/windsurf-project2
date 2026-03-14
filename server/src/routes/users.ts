@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import { eq, ilike, and } from 'drizzle-orm';
+import { eq, ilike, and, count, sql, desc } from 'drizzle-orm';
 import { getDb } from '../db/db';
 import { users } from '@soulseer/shared/schema';
 import { authMiddleware } from '../middleware/auth';
@@ -54,6 +54,20 @@ const searchUsersSchema = z.object({
   isOnline: z.boolean().optional(),
   limit: z.number().int().positive().max(100).optional().default(20),
   offset: z.number().int().nonnegative().optional().default(0),
+});
+
+const bulkUpdateSchema = z.object({
+  userIds: z.array(z.number().int().positive()),
+  updates: z.object({
+    role: z.enum(['client', 'reader', 'admin']).optional(),
+    isOnline: z.boolean().optional(),
+    accountBalance: z.number().int().nonnegative().optional(),
+  }),
+});
+
+const bulkDeleteSchema = z.object({
+  userIds: z.array(z.number().int().positive()),
+  reason: z.string().min(1).max(500),
 });
 
 // Get user profile by ID
