@@ -13,3 +13,13 @@ pool.on('error', (err) => {
 });
 
 export const db = drizzle(pool, { schema });
+
+/** Alias for `db` — used in route handlers for consistency */
+export function getDb() {
+  return db;
+}
+
+/** Get the raw pool for direct queries */
+export function getPool() {
+  return pool;
+}

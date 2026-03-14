@@ -29,9 +29,8 @@ export type InsertForumFlag = InferInsertModel<typeof forumFlags>;
 // ─── Enum Value Types ───────────────────────────────────────────────────────
 
 export type UserRole = SelectUser["role"];
-export type ReadingType = SelectReading["type"];
+export type ReadingType = SelectReading["readingType"];
 export type ReadingStatus = SelectReading["status"];
-export type PaymentStatus = SelectReading["paymentStatus"];
 export type TransactionType = SelectTransaction["type"];
 export type ForumCategory = SelectForumPost["category"];
 

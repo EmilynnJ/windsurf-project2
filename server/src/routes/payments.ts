@@ -1,76 +1,88 @@
-import { Router } from 'express';
-import { z } from 'zod';
-import express from 'express';
-import { eq } from 'drizzle-orm';
-import { db } from '../db/db';
-import { users } from '../db/schema';
-import { checkJwt } from '../middleware/auth';
-import { resolveUser, requireRole } from '../middleware/rbac';
-import { validate } from '../middleware/validate';
-import { strictLimiter, webhookLimiter } from '../middleware/rate-limit';
-import { createPaymentIntent, handleWebhook, createPayout } from '../services/stripe-service';
-import { AppError } from '../middleware/error-handler';
-import { logger } from '../utils/logger';
+import { Router } from "express";
+import { eq, desc, sql } from "drizzle-orm";
+import { z } from "zod";
+import Stripe from "stripe";
+import express from "express";
+import { getDb } from "../db/db";
+import { users, transactions } from "../db/schema";
+import { requireAuth } from "../middleware/auth";
+import { validateBody } from "../middleware/validate";
+import { config } from "../config";
+import { logger } from "../utils/logger";
 
 const router = Router();
+const stripe = new Stripe(config.stripe.secretKey, { apiVersion: "2024-06-20" as any });
 
-const createIntentSchema = z.object({
-  amount: z.number().int().min(500, 'Minimum top-up is $5.00'),
-});
+const MIN_TOPUP = 500;
 
-// POST /api/payments/create-intent — create Stripe PaymentIntent
-router.post(
-  '/create-intent',
-  strictLimiter, checkJwt, resolveUser,
-  validate(createIntentSchema),
-  async (req, res, next) => {
-    try {
-      const { amount } = req.body as z.infer<typeof createIntentSchema>;
-      const result = await createPaymentIntent(req.user!.id, amount);
-      res.json(result);
-    } catch (err) { next(err); }
-  },
-);
-
-// POST /api/payments/webhook — Stripe webhook (verify signature!)
-router.post(
-  '/webhook',
-  webhookLimiter,
-  express.raw({ type: 'application/json' }),
-  async (req, res, next) => {
-    try {
-      const signature = req.headers['stripe-signature'];
-      if (!signature || typeof signature !== 'string') {
-        throw new AppError(400, 'Missing Stripe signature');
-      }
-      await handleWebhook(req.body as Buffer, signature);
-      res.json({ received: true });
-    } catch (err) { next(err); }
-  },
-);
-
-// GET /api/payments/balance — get current balance (Auth)
-router.get('/balance', checkJwt, resolveUser, async (req, res, next) => {
+// ─── Webhook (no auth, raw body) ───────────────────────────────────────────
+router.post("/webhook", express.raw({ type: "application/json" }), async (req, res, next) => {
   try {
-    const [user] = await db.select({ accountBalance: users.accountBalance })
-      .from(users).where(eq(users.id, req.user!.id)).limit(1);
-    if (!user) throw new AppError(404, 'User not found');
-    res.json({ balance: user.accountBalance });
+    const sig = req.headers["stripe-signature"] as string;
+    if (!sig) { res.status(400).json({ error: "Missing signature" }); return; }
+    let event: Stripe.Event;
+    try { event = stripe.webhooks.constructEvent(req.body, sig, config.stripe.webhookSecret); }
+    catch { res.status(400).json({ error: "Invalid signature" }); return; }
+
+    if (event.type === "payment_intent.succeeded") {
+      const pi = event.data.object as Stripe.PaymentIntent;
+      const userId = parseInt(pi.metadata.userId ?? "0", 10);
+      if (!userId) { logger.warn({ piId: pi.id }, "No userId in metadata"); res.json({ received: true }); return; }
+      const db = getDb();
+      await db.transaction(async (tx) => {
+        const [u] = await tx.update(users).set({ balance: sql`${users.balance} + ${pi.amount}`, updatedAt: new Date() }).where(eq(users.id, userId)).returning({ balance: users.balance });
+        await tx.insert(transactions).values({ userId, type: "topup", amount: pi.amount, balanceAfter: u!.balance, stripePaymentIntentId: pi.id, note: `Top-up $${(pi.amount / 100).toFixed(2)}` });
+      });
+      logger.info({ userId, amount: pi.amount }, "Balance credited");
+    }
+    res.json({ received: true });
   } catch (err) { next(err); }
 });
 
-// POST /api/payments/payout — admin triggers reader payout (Admin)
-router.post(
-  '/payout',
-  checkJwt, resolveUser, requireRole('admin'),
-  async (req, res, next) => {
-    try {
-      const { readerId } = req.body as { readerId: number };
-      if (!readerId) throw new AppError(400, 'readerId is required');
-      const result = await createPayout(readerId);
-      res.json(result);
-    } catch (err) { next(err); }
-  },
-);
+// ─── Authenticated routes ──────────────────────────────────────────────────
+router.get("/balance", requireAuth, async (req, res, next) => {
+  try {
+    const db = getDb();
+    const [u] = await db.select({ balance: users.balance }).from(users).where(eq(users.id, req.user!.id));
+    res.json({ balance: u?.balance ?? 0 });
+  } catch (err) { next(err); }
+});
+
+const topupSchema = z.object({ amount: z.number().int().min(MIN_TOPUP) });
+router.post("/create-payment-intent", requireAuth, validateBody(topupSchema), async (req, res, next) => {
+  try {
+    const pi = await stripe.paymentIntents.create({
+      amount: req.body.amount, currency: "usd",
+      metadata: { userId: String(req.user!.id), type: "balance_topup" },
+      automatic_payment_methods: { enabled: true },
+    });
+    res.json({ clientSecret: pi.client_secret, paymentIntentId: pi.id });
+  } catch (err) { next(err); }
+});
+
+router.get("/transactions", requireAuth, async (req, res, next) => {
+  try {
+    const db = getDb();
+    const list = await db.select().from(transactions).where(eq(transactions.userId, req.user!.id)).orderBy(desc(transactions.createdAt)).limit(50);
+    res.json(list);
+  } catch (err) { next(err); }
+});
+
+const payoutSchema = z.object({});
+router.post("/payout", requireAuth, validateBody(payoutSchema), async (req, res, next) => {
+  try {
+    const db = getDb();
+    if (req.user!.role !== "reader") { res.status(403).json({ error: "Readers only" }); return; }
+    const [reader] = await db.select().from(users).where(eq(users.id, req.user!.id));
+    if (!reader?.stripeAccountId) { res.status(400).json({ error: "No Stripe Connect account" }); return; }
+    if (reader.balance < 1500) { res.status(400).json({ error: "Min payout $15.00" }); return; }
+    const amount = reader.balance;
+    const result = await db.update(users).set({ balance: 0, updatedAt: new Date() }).where(sql`${users.id} = ${reader.id} AND ${users.balance} = ${amount}`).returning({ id: users.id });
+    if (!result.length) { res.status(409).json({ error: "Balance changed, retry" }); return; }
+    const transfer = await stripe.transfers.create({ amount, currency: "usd", destination: reader.stripeAccountId, metadata: { readerId: String(reader.id) } });
+    await db.insert(transactions).values({ userId: reader.id, type: "reader_payout", amount: -amount, balanceAfter: 0, stripePaymentIntentId: transfer.id, note: `Payout $${(amount / 100).toFixed(2)}` });
+    res.json({ transferId: transfer.id, amount });
+  } catch (err) { next(err); }
+});
 
 export default router;

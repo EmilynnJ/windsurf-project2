@@ -1,194 +1,134 @@
-import { Router } from 'express';
-import { z } from 'zod';
-import { eq, and } from 'drizzle-orm';
-import { db } from '../db/db';
-import { users, readings } from '../db/schema';
-import { checkJwt } from '../middleware/auth';
-import { resolveUser, requireRole, requireParticipant } from '../middleware/rbac';
-import { validate } from '../middleware/validate';
-import { strictLimiter } from '../middleware/rate-limit';
-import { AgoraService } from '../services/agora-service';
-import { billingService } from '../services/billing-service';
-import { wsService } from '../services/websocket-service';
-import { AppError } from '../middleware/error-handler';
-import { logger } from '../utils/logger';
+import { Router } from "express";
+import { eq, and, or, desc, sql } from "drizzle-orm";
+import { z } from "zod";
+import { getDb } from "../db/db";
+import { users, readings, transactions } from "../db/schema";
+import { requireAuth } from "../middleware/auth";
+import { validateBody } from "../middleware/validate";
+import { AgoraService } from "../services/agora-service";
+import { wsService } from "../services/websocket-service";
+import { logger } from "../utils/logger";
 
 const router = Router();
+router.use(requireAuth);
+
 const MIN_BALANCE_CENTS = 500;
+const GRACE_PERIOD_MS = 120_000;
 
-const createReadingSchema = z.object({
-  readerId: z.number().int().positive(),
-  type: z.enum(['chat', 'voice', 'video']),
-});
+const startSchema = z.object({ readerId: z.number().int().positive(), readingType: z.enum(["chat", "voice", "video"]) });
 
-const reviewSchema = z.object({
-  rating: z.number().int().min(1).max(5),
-  review: z.string().max(2000).optional(),
-});
-
-const messageSchema = z.object({
-  content: z.string().min(1).max(5000),
-});
-
-// POST /api/readings — create reading request (Client, checks min $5 balance)
-router.post(
-  '/',
-  strictLimiter, checkJwt, resolveUser, requireRole('client'),
-  validate(createReadingSchema),
-  async (req, res, next) => {
-    try {
-      const client = req.user!;
-      const { readerId, type } = req.body as z.infer<typeof createReadingSchema>;
-
-      const [reader] = await db.select().from(users)
-        .where(and(eq(users.id, readerId), eq(users.role, 'reader'))).limit(1);
-      if (!reader) throw new AppError(404, 'Reader not found');
-      if (!reader.isOnline) throw new AppError(400, 'Reader is not currently available');
-
-      const pricePerMinute = type === 'chat' ? reader.pricingChat
-        : type === 'voice' ? reader.pricingVoice : reader.pricingVideo;
-      if (pricePerMinute <= 0) throw new AppError(400, `This reader does not offer ${type} readings`);
-      if (client.accountBalance < MIN_BALANCE_CENTS) {
-        throw new AppError(400, `Minimum balance of $${(MIN_BALANCE_CENTS / 100).toFixed(2)} required.`);
-      }
-
-      const [reading] = await db.insert(readings).values({
-        readerId, clientId: client.id, type, status: 'pending', pricePerMinute,
-        agoraChannelName: 'pending',
-        chatTranscript: type === 'chat' ? [] : null,
-      }).returning();
-
-      const agoraChannelName = `reading_${reading!.id}`;
-      const [updated] = await db.update(readings).set({ agoraChannelName })
-        .where(eq(readings.id, reading!.id)).returning();
-
-      wsService.send(readerId, 'reading:requested', {
-        readingId: updated!.id, clientId: client.id,
-        clientName: client.fullName ?? client.username, type, pricePerMinute,
-      });
-
-      logger.info({ readingId: updated!.id, clientId: client.id, readerId, type }, 'Reading created');
-      res.status(201).json(updated);
-    } catch (err) { next(err); }
-  },
-);
-
-// PUT /api/readings/:id/accept — reader accepts (Reader only)
-router.put('/:id/accept', checkJwt, resolveUser, requireRole('reader'), async (req, res, next) => {
+router.post("/start", validateBody(startSchema), async (req, res, next) => {
   try {
+    const db = getDb();
+    const { readerId, readingType } = req.body;
+    if (readerId === req.user!.id) { res.status(400).json({ error: "Cannot read for yourself" }); return; }
+    const [reader] = await db.select().from(users).where(and(eq(users.id, readerId), eq(users.role, "reader")));
+    if (!reader) { res.status(404).json({ error: "Reader not found" }); return; }
+    if (!reader.isOnline) { res.status(409).json({ error: "Reader is offline" }); return; }
+    const rateKey = readingType === "chat" ? "pricingChat" : readingType === "voice" ? "pricingVoice" : "pricingVideo";
+    const ratePerMinute = reader[rateKey];
+    if (!ratePerMinute) { res.status(400).json({ error: `Reader has no ${readingType} pricing` }); return; }
+    if (req.user!.balance < MIN_BALANCE_CENTS) { res.status(402).json({ error: `Minimum balance $${(MIN_BALANCE_CENTS / 100).toFixed(2)} required` }); return; }
+    const channelName = `reading_${Date.now()}_${readerId}`;
+    const [reading] = await db.insert(readings).values({
+      clientId: req.user!.id, readerId, readingType, ratePerMinute, agoraChannel: channelName, status: "pending",
+    }).returning();
+    wsService.send(readerId, "reading:request", { readingId: reading!.id, clientId: req.user!.id, readingType, clientName: req.user!.fullName });
+    const clientTokens = AgoraService.generateTokens(channelName, req.user!.id);
+    const readerTokens = AgoraService.generateTokens(channelName, readerId);
+    res.status(201).json({ reading, clientTokens, readerTokens });
+  } catch (err) { next(err); }
+});
+
+router.post("/:id/accept", async (req, res, next) => {
+  try {
+    const db = getDb();
     const readingId = parseInt(req.params.id!, 10);
-    if (isNaN(readingId)) throw new AppError(400, 'Invalid reading ID');
-
-    const [reading] = await db.select().from(readings).where(eq(readings.id, readingId)).limit(1);
-    if (!reading) throw new AppError(404, 'Reading not found');
-    if (reading.readerId !== req.user!.id) throw new AppError(403, 'Only the assigned reader can accept');
-    if (reading.status !== 'pending') throw new AppError(400, `Cannot accept: status is ${reading.status}`);
-
-    const [updated] = await db.update(readings).set({ status: 'accepted' })
-      .where(eq(readings.id, readingId)).returning();
-
-    wsService.send(reading.clientId, 'reading:accepted', { readingId, readerId: req.user!.id });
-    res.json(updated);
-  } catch (err) { next(err); }
-});
-
-// POST /api/readings/:id/agora-token — get Agora token (Participant only)
-router.post('/:id/agora-token', checkJwt, resolveUser, requireParticipant, async (req, res, next) => {
-  try {
-    const reading = req.reading!;
-    if (reading.status !== 'accepted' && reading.status !== 'in_progress') {
-      throw new AppError(400, 'Reading must be accepted or in progress');
-    }
-    const tokens = AgoraService.generateTokens(reading.agoraChannelName!, req.user!.id, 'publisher');
-    res.json(tokens);
-  } catch (err) { next(err); }
-});
-
-// POST /api/readings/:id/start — both joined, start billing (Participant)
-router.post('/:id/start', checkJwt, resolveUser, requireParticipant, async (req, res, next) => {
-  try {
-    const reading = req.reading!;
-    if (reading.status !== 'accepted') throw new AppError(400, `Cannot start: status is ${reading.status}`);
-
+    const [reading] = await db.select().from(readings).where(and(eq(readings.id, readingId), eq(readings.readerId, req.user!.id), eq(readings.status, "pending")));
+    if (!reading) { res.status(404).json({ error: "Reading not found or not pending" }); return; }
     const now = new Date();
-    const [updated] = await db.update(readings)
-      .set({ status: 'in_progress', startedAt: now })
-      .where(eq(readings.id, reading.id)).returning();
-
-    billingService.startBilling(reading.id, reading.clientId, reading.readerId, reading.pricePerMinute);
-    wsService.broadcast([reading.clientId, reading.readerId], 'reading:started', {
-      readingId: reading.id, startedAt: now.toISOString(),
-    });
+    const [updated] = await db.update(readings).set({ status: "active", startedAt: now, lastHeartbeat: now, updatedAt: now }).where(eq(readings.id, readingId)).returning();
+    wsService.send(reading.clientId, "reading:accepted", { readingId });
     res.json(updated);
   } catch (err) { next(err); }
 });
 
-// POST /api/readings/:id/end — end session (Participant)
-router.post('/:id/end', checkJwt, resolveUser, requireParticipant, async (req, res, next) => {
+router.post("/:id/heartbeat", async (req, res, next) => {
   try {
-    const reading = req.reading!;
-    if (reading.status !== 'in_progress' && reading.status !== 'accepted') {
-      throw new AppError(400, `Cannot end: status is ${reading.status}`);
+    const db = getDb();
+    const readingId = parseInt(req.params.id!, 10);
+    const [reading] = await db.select().from(readings).where(and(eq(readings.id, readingId), eq(readings.status, "active"),
+      or(eq(readings.clientId, req.user!.id), eq(readings.readerId, req.user!.id))));
+    if (!reading) { res.status(404).json({ error: "Active reading not found" }); return; }
+    await db.update(readings).set({ lastHeartbeat: new Date() }).where(eq(readings.id, readingId));
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+router.post("/:id/end", async (req, res, next) => {
+  try {
+    const db = getDb();
+    const readingId = parseInt(req.params.id!, 10);
+    const [reading] = await db.select().from(readings).where(and(eq(readings.id, readingId),
+      or(eq(readings.clientId, req.user!.id), eq(readings.readerId, req.user!.id))));
+    if (!reading) { res.status(404).json({ error: "Reading not found" }); return; }
+    if (reading.status !== "active" && reading.status !== "paused") { res.status(409).json({ error: "Reading is not active" }); return; }
+    const now = new Date();
+    const durationSeconds = reading.startedAt ? Math.floor((now.getTime() - reading.startedAt.getTime()) / 1000) : 0;
+    const billedMinutes = Math.ceil(durationSeconds / 60);
+    const totalCharged = billedMinutes * reading.ratePerMinute;
+    const readerEarned = Math.floor(totalCharged * 0.70);
+    const platformEarned = totalCharged - readerEarned;
+
+    await db.transaction(async (tx) => {
+      await tx.update(readings).set({ status: "completed", completedAt: now, durationSeconds, totalCharged, readerEarned, platformEarned, updatedAt: now }).where(eq(readings.id, readingId));
+      // Charge client
+      const [clientAfter] = await tx.update(users).set({ balance: sql`${users.balance} - ${totalCharged}`, updatedAt: now }).where(eq(users.id, reading.clientId)).returning({ balance: users.balance });
+      await tx.insert(transactions).values({ userId: reading.clientId, readingId, type: "reading_charge", amount: -totalCharged, balanceAfter: clientAfter!.balance, note: `Reading #${readingId}: ${billedMinutes} min` });
+      // Credit reader
+      const [readerAfter] = await tx.update(users).set({ balance: sql`${users.balance} + ${readerEarned}`, totalReadings: sql`${users.totalReadings} + 1`, updatedAt: now }).where(eq(users.id, reading.readerId)).returning({ balance: users.balance });
+      await tx.insert(transactions).values({ userId: reading.readerId, readingId, type: "reader_payout", amount: readerEarned, balanceAfter: readerAfter!.balance, note: `Earned from reading #${readingId}` });
+    });
+
+    wsService.broadcast([reading.clientId, reading.readerId], "reading:ended", { readingId, durationSeconds, totalCharged, readerEarned });
+    res.json({ readingId, durationSeconds, totalCharged, readerEarned, platformEarned });
+  } catch (err) { next(err); }
+});
+
+router.post("/:id/rate", async (req, res, next) => {
+  try {
+    const db = getDb();
+    const readingId = parseInt(req.params.id!, 10);
+    const { rating, review } = req.body;
+    if (!rating || rating < 1 || rating > 5) { res.status(400).json({ error: "Rating must be 1-5" }); return; }
+    const [reading] = await db.select().from(readings).where(and(eq(readings.id, readingId), eq(readings.clientId, req.user!.id), eq(readings.status, "completed")));
+    if (!reading) { res.status(404).json({ error: "Completed reading not found" }); return; }
+    const [updated] = await db.update(readings).set({ rating, review: review || null, updatedAt: new Date() }).where(eq(readings.id, readingId)).returning();
+    res.json(updated);
+  } catch (err) { next(err); }
+});
+
+router.get("/history", async (req, res, next) => {
+  try {
+    const db = getDb();
+    const userId = req.user!.id;
+    const result = await db.select().from(readings)
+      .where(or(eq(readings.clientId, userId), eq(readings.readerId, userId)))
+      .orderBy(desc(readings.createdAt)).limit(50);
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
+router.get("/:id", async (req, res, next) => {
+  try {
+    const db = getDb();
+    const readingId = parseInt(req.params.id!, 10);
+    const [reading] = await db.select().from(readings).where(eq(readings.id, readingId));
+    if (!reading) { res.status(404).json({ error: "Reading not found" }); return; }
+    if (reading.clientId !== req.user!.id && reading.readerId !== req.user!.id && req.user!.role !== "admin") {
+      res.status(403).json({ error: "Not a participant" }); return;
     }
-    await billingService.finalizeReading(reading.id);
-    const [final] = await db.select().from(readings).where(eq(readings.id, reading.id)).limit(1);
-    res.json(final);
-  } catch (err) { next(err); }
-});
-
-// POST /api/readings/:id/review — submit review (Client only, post-session)
-router.post('/:id/review', checkJwt, resolveUser, requireParticipant, validate(reviewSchema), async (req, res, next) => {
-  try {
-    const reading = req.reading!;
-    if (reading.clientId !== req.user!.id) throw new AppError(403, 'Only the client can leave a review');
-    if (reading.status !== 'completed') throw new AppError(400, 'Can only review completed readings');
-    if (reading.rating !== null) throw new AppError(400, 'Already reviewed');
-
-    const { rating, review } = req.body as z.infer<typeof reviewSchema>;
-    const [updated] = await db.update(readings).set({ rating, review: review ?? null })
-      .where(eq(readings.id, reading.id)).returning();
-
-    res.json({ readingId: updated!.id, rating: updated!.rating, review: updated!.review });
-  } catch (err) { next(err); }
-});
-
-// GET /api/readings/:id — get reading details (Participant)
-router.get('/:id', checkJwt, resolveUser, requireParticipant, async (req, res) => {
-  res.json(req.reading);
-});
-
-// GET /api/readings/:id/messages — get chat messages (Participant)
-router.get('/:id/messages', checkJwt, resolveUser, requireParticipant, async (req, res, next) => {
-  try {
-    const reading = req.reading!;
-    if (reading.type !== 'chat') throw new AppError(400, 'Messages only available for chat readings');
-    res.json({ messages: reading.chatTranscript ?? [] });
-  } catch (err) { next(err); }
-});
-
-// POST /api/readings/:id/messages — send chat message (Participant)
-router.post('/:id/messages', checkJwt, resolveUser, requireParticipant, validate(messageSchema), async (req, res, next) => {
-  try {
-    const reading = req.reading!;
-    const user = req.user!;
-    if (reading.type !== 'chat') throw new AppError(400, 'Messages only available for chat readings');
-    if (reading.status !== 'in_progress') throw new AppError(400, 'Can only send messages during active reading');
-
-    const { content } = req.body as z.infer<typeof messageSchema>;
-    const newMsg = {
-      senderId: user.id,
-      senderName: user.fullName ?? user.username ?? `User ${user.id}`,
-      content,
-      timestamp: new Date().toISOString(),
-    };
-
-    const current = (reading.chatTranscript ?? []) as Array<typeof newMsg>;
-    await db.update(readings).set({ chatTranscript: [...current, newMsg] }).where(eq(readings.id, reading.id));
-
-    const otherId = user.id === reading.clientId ? reading.readerId : reading.clientId;
-    wsService.send(otherId, 'message:new', { readingId: reading.id, message: newMsg });
-
-    res.status(201).json(newMsg);
+    res.json(reading);
   } catch (err) { next(err); }
 });
 

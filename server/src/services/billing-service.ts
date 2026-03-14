@@ -1,289 +1,110 @@
-import { eq, sql } from 'drizzle-orm';
-import { db } from '../db/db';
-import { users, readings, transactions } from '../db/schema';
-import { wsService } from './websocket-service';
-import { logger } from '../utils/logger';
+import { eq, and, lt, sql } from "drizzle-orm";
+import { db } from "../db/db";
+import { users, readings, transactions } from "../db/schema";
+import { wsService } from "./websocket-service";
+import { logger } from "../utils/logger";
 
-const BILLING_INTERVAL_MS = 60_000;
-const GRACE_PERIOD_MS = 120_000;
-const PLATFORM_FEE_RATE = 0.30; // 30% platform fee
-
-interface ActiveSession {
-  timerId: NodeJS.Timeout;
-  readingId: number;
-  clientId: number;
-  readerId: number;
-  pricePerMinute: number;
-  paused: boolean;
-  graceTimerId?: NodeJS.Timeout;
-}
+const TICK_INTERVAL_MS = 60_000; // 1 minute
+const GRACE_PERIOD_MS = 120_000; // 2 minutes
+const MIN_BALANCE_CENTS = 0;
 
 class BillingService {
-  private sessions = new Map<number, ActiveSession>();
+  private timer: NodeJS.Timeout | null = null;
 
-  startBilling(
-    readingId: number,
-    clientId: number,
-    readerId: number,
-    pricePerMinute: number,
-  ): void {
-    if (this.sessions.has(readingId)) {
-      logger.warn({ readingId }, 'Billing already active for reading');
-      return;
-    }
-
-    const timerId = setInterval(() => {
-      this.tick(readingId).catch((err) => {
-        logger.error({ err, readingId }, 'Billing tick error');
-      });
-    }, BILLING_INTERVAL_MS);
-
-    this.sessions.set(readingId, {
-      timerId,
-      readingId,
-      clientId,
-      readerId,
-      pricePerMinute,
-      paused: false,
-    });
-    logger.info(
-      { readingId, clientId, readerId, pricePerMinute },
-      'Billing started',
-    );
-  }
-
-  pauseBilling(readingId: number, disconnectedUserId: number): void {
-    const session = this.sessions.get(readingId);
-    if (!session || session.paused) return;
-
-    session.paused = true;
-    clearInterval(session.timerId);
-
-    const otherId =
-      disconnectedUserId === session.clientId
-        ? session.readerId
-        : session.clientId;
-    wsService.send(otherId, 'reading:participant_disconnected', {
-      readingId,
-      disconnectedUserId,
-      gracePeriodMs: GRACE_PERIOD_MS,
-    });
-
-    session.graceTimerId = setTimeout(() => {
-      logger.info({ readingId }, 'Grace period expired — ending session');
-      this.finalizeReading(readingId).catch((err) => {
-        logger.error({ err, readingId }, 'Error finalizing after grace period');
-      });
-    }, GRACE_PERIOD_MS);
-
-    logger.info(
-      { readingId, disconnectedUserId },
-      'Billing paused — grace period started',
-    );
-  }
-
-  resumeBilling(readingId: number, reconnectedUserId: number): void {
-    const session = this.sessions.get(readingId);
-    if (!session || !session.paused) return;
-
-    if (session.graceTimerId) {
-      clearTimeout(session.graceTimerId);
-      session.graceTimerId = undefined;
-    }
-
-    session.paused = false;
-    session.timerId = setInterval(() => {
-      this.tick(readingId).catch((err) => {
-        logger.error({ err, readingId }, 'Billing tick error');
-      });
-    }, BILLING_INTERVAL_MS);
-
-    const otherId =
-      reconnectedUserId === session.clientId
-        ? session.readerId
-        : session.clientId;
-    wsService.send(otherId, 'reading:participant_reconnected', {
-      readingId,
-      reconnectedUserId,
-    });
-
-    logger.info({ readingId, reconnectedUserId }, 'Billing resumed');
-  }
-
-  async finalizeReading(readingId: number): Promise<void> {
-    const session = this.sessions.get(readingId);
-    if (session) {
-      clearInterval(session.timerId);
-      if (session.graceTimerId) clearTimeout(session.graceTimerId);
-      this.sessions.delete(readingId);
-    }
-
-    const now = new Date();
-    const [reading] = await db
-      .select()
-      .from(readings)
-      .where(eq(readings.id, readingId))
-      .limit(1);
-
-    if (!reading) return;
-
-    let duration = 0;
-    if (reading.startedAt) {
-      duration = Math.max(
-        1,
-        Math.round(
-          (now.getTime() - new Date(reading.startedAt).getTime()) / 60_000,
-        ),
-      );
-    }
-
-    const totalCost = duration * reading.pricePerMinute;
-    const platformFee = Math.floor(totalCost * PLATFORM_FEE_RATE);
-    const readerEarnings = totalCost - platformFee;
-
-    await db
-      .update(readings)
-      .set({
-        status: 'completed',
-        completedAt: now,
-        duration,
-        billedMinutes: duration,
-        totalCost,
-        platformFee,
-        readerEarnings,
-        paymentStatus: 'paid',
-      })
-      .where(eq(readings.id, readingId));
-
-    // Update reader earnings total
-    await db
-      .update(users)
-      .set({ totalEarnings: sql`${users.totalEarnings} + ${readerEarnings}` })
-      .where(eq(users.id, reading.readerId));
-
-    // Update client spending total
-    await db
-      .update(users)
-      .set({ totalSpent: sql`${users.totalSpent} + ${totalCost}` })
-      .where(eq(users.id, reading.clientId));
-
-    wsService.broadcast(
-      [reading.clientId, reading.readerId],
-      'reading:ended',
-      {
-        readingId,
-        duration,
-        totalCost,
-        platformFee,
-        readerEarnings,
-      },
-    );
-
-    logger.info(
-      { readingId, duration, totalCost, platformFee, readerEarnings },
-      'Reading finalized',
-    );
+  start(): void {
+    if (this.timer) return;
+    this.timer = setInterval(() => this.tick(), TICK_INTERVAL_MS);
+    logger.info("Billing service started");
   }
 
   shutdown(): void {
-    for (const [readingId, session] of this.sessions) {
-      clearInterval(session.timerId);
-      if (session.graceTimerId) clearTimeout(session.graceTimerId);
-      logger.info({ readingId }, 'Billing timer cleared on shutdown');
-    }
-    this.sessions.clear();
+    if (this.timer) { clearInterval(this.timer); this.timer = null; }
+    logger.info("Billing service stopped");
   }
 
-  private async tick(readingId: number): Promise<void> {
-    const session = this.sessions.get(readingId);
-    if (!session || session.paused) return;
+  private async tick(): Promise<void> {
+    try {
+      // 1) Check for stale heartbeats → missed readings
+      const graceCutoff = new Date(Date.now() - GRACE_PERIOD_MS);
+      const stale = await db.select().from(readings)
+        .where(and(eq(readings.status, "active"), lt(readings.lastHeartbeat, graceCutoff)));
 
-    const { clientId, readerId, pricePerMinute } = session;
-    const readerShare = Math.floor(pricePerMinute * (1 - PLATFORM_FEE_RATE));
-    const platformShare = pricePerMinute - readerShare;
+      for (const reading of stale) {
+        await this.endReading(reading.id, "missed");
+        logger.warn({ readingId: reading.id }, "Reading ended due to stale heartbeat");
+      }
 
-    // Atomic deduction — only succeeds if client has sufficient balance
-    const result = await db
-      .update(users)
-      .set({
-        accountBalance: sql`${users.accountBalance} - ${pricePerMinute}`,
-      })
-      .where(
-        sql`${users.id} = ${clientId} AND ${users.accountBalance} >= ${pricePerMinute}`,
-      )
-      .returning({ id: users.id, accountBalance: users.accountBalance });
+      // 2) Charge active readings per minute
+      const active = await db.select().from(readings).where(eq(readings.status, "active"));
 
-    if (result.length === 0) {
-      logger.info(
-        { readingId, clientId },
-        'Insufficient balance — ending session',
-      );
-      wsService.send(clientId, 'balance:insufficient', { readingId });
-      await this.finalizeReading(readingId);
+      for (const reading of active) {
+        await this.chargeMinute(reading);
+      }
+    } catch (err) {
+      logger.error({ err }, "Billing tick error");
+    }
+  }
+
+  private async chargeMinute(reading: typeof readings.$inferSelect): Promise<void> {
+    const rate = reading.ratePerMinute;
+    if (rate <= 0) return;
+
+    const [client] = await db.select({ balance: users.balance }).from(users).where(eq(users.id, reading.clientId));
+    if (!client || client.balance < rate) {
+      // Insufficient balance — end reading
+      await this.endReading(reading.id, "completed");
+      wsService.broadcast([reading.clientId, reading.readerId], "reading:insufficient_balance", { readingId: reading.id });
       return;
     }
 
-    // Credit reader (70% share)
-    await db
-      .update(users)
-      .set({
-        accountBalance: sql`${users.accountBalance} + ${readerShare}`,
-      })
-      .where(eq(users.id, readerId));
+    // Charge 1 minute atomically
+    await db.update(readings).set({
+      durationSeconds: sql`${readings.durationSeconds} + 60`,
+      totalCharged: sql`${readings.totalCharged} + ${rate}`,
+      readerEarned: sql`${readings.readerEarned} + ${Math.floor(rate * 0.70)}`,
+      platformEarned: sql`${readings.platformEarned} + ${rate - Math.floor(rate * 0.70)}`,
+      updatedAt: new Date(),
+    }).where(eq(readings.id, reading.id));
 
-    // Log transactions for both client charge and reader earning
-    const clientBalance = result[0]!.accountBalance;
-    await db.insert(transactions).values([
-      {
-        userId: clientId,
-        type: 'reading_charge' as const,
-        amount: -pricePerMinute,
-        balanceBefore: clientBalance + pricePerMinute,
-        balanceAfter: clientBalance,
-        readingId,
-        description: `Reading #${readingId} — 1 min charge`,
-      },
-      {
-        userId: readerId,
-        type: 'reader_credit' as const,
-        amount: readerShare,
-        balanceBefore: 0,
-        balanceAfter: 0,
-        readingId,
-        description: `Reading #${readingId} — 1 min earning (${Math.round((1 - PLATFORM_FEE_RATE) * 100)}%)`,
-      },
-    ]);
+    await db.update(users).set({
+      balance: sql`${users.balance} - ${rate}`,
+      updatedAt: new Date(),
+    }).where(eq(users.id, reading.clientId));
+  }
 
-    // Update billed minutes on reading
-    await db
-      .update(readings)
-      .set({
-        billedMinutes: sql`${readings.billedMinutes} + 1`,
-        totalCost: sql`${readings.totalCost} + ${pricePerMinute}`,
-        platformFee: sql`${readings.platformFee} + ${platformShare}`,
-        readerEarnings: sql`${readings.readerEarnings} + ${readerShare}`,
-      })
-      .where(eq(readings.id, readingId));
+  private async endReading(readingId: number, status: "completed" | "missed"): Promise<void> {
+    const now = new Date();
+    const [reading] = await db.select().from(readings).where(eq(readings.id, readingId));
+    if (!reading) return;
 
-    // Warn client if balance getting low (< 3 minutes remaining)
-    if (clientBalance < pricePerMinute * 3) {
-      wsService.send(clientId, 'balance:low', {
-        readingId,
-        balance: clientBalance,
-        minutesRemaining: Math.floor(clientBalance / pricePerMinute),
+    await db.update(readings).set({ status, completedAt: now, updatedAt: now }).where(eq(readings.id, readingId));
+
+    // Credit reader balance
+    if (reading.readerEarned > 0) {
+      const [readerAfter] = await db.update(users).set({
+        balance: sql`${users.balance} + ${reading.readerEarned}`,
+        totalReadings: sql`${users.totalReadings} + 1`,
+        updatedAt: now,
+      }).where(eq(users.id, reading.readerId)).returning({ balance: users.balance });
+
+      await db.insert(transactions).values({
+        userId: reading.readerId, readingId, type: "reader_payout",
+        amount: reading.readerEarned, balanceAfter: readerAfter?.balance ?? 0,
+        note: `Earned from reading #${readingId}`,
       });
     }
 
-    logger.debug(
-      {
-        readingId,
-        clientId,
-        charged: pricePerMinute,
-        readerCredit: readerShare,
-        platformFee: platformShare,
-      },
-      'Billing tick processed',
-    );
+    // Record client charge transaction
+    if (reading.totalCharged > 0) {
+      const [clientAfter] = await db.select({ balance: users.balance }).from(users).where(eq(users.id, reading.clientId));
+      await db.insert(transactions).values({
+        userId: reading.clientId, readingId, type: "reading_charge",
+        amount: -reading.totalCharged, balanceAfter: clientAfter?.balance ?? 0,
+        note: `Charged for reading #${readingId}`,
+      });
+    }
+
+    wsService.broadcast([reading.clientId, reading.readerId], "reading:ended", { readingId, status });
   }
 }
 

@@ -1,285 +1,110 @@
-import { Router } from 'express';
-import { z } from 'zod';
-import { eq, desc, sql, and } from 'drizzle-orm';
-import { db } from '../db/db';
-import { forumPosts, forumComments, forumFlags, users } from '../db/schema';
-import { checkJwt } from '../middleware/auth';
-import { resolveUser, requireRole } from '../middleware/rbac';
-import { validate } from '../middleware/validate';
-import { AppError } from '../middleware/error-handler';
-import { logger } from '../utils/logger';
+import { Router } from "express";
+import { eq, desc, sql, and, count } from "drizzle-orm";
+import { z } from "zod";
+import { getDb } from "../db/db";
+import { users, forumPosts, forumComments, forumFlags } from "../db/schema";
+import { requireAuth } from "../middleware/auth";
+import { validateBody } from "../middleware/validate";
 
 const router = Router();
 
-const createPostSchema = z.object({
-  title: z.string().min(1).max(200),
-  content: z.string().min(1).max(10000),
-  category: z.enum([
-    'general',
-    'readings',
-    'spiritual_growth',
-    'ask_a_reader',
-    'announcements',
-  ]),
-});
-
-const createCommentSchema = z.object({
-  content: z.string().min(1).max(5000),
-});
-
-const flagSchema = z.object({
-  reason: z.string().min(1).max(500),
-});
-
-// GET /api/forum/posts — list posts with pagination (Public)
-router.get('/posts', async (req, res, next) => {
+// ─── List posts ─────────────────────────────────────────────────────────────
+router.get("/posts", async (req, res, next) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
-    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit as string, 10) || 10));
-    const offset = (page - 1) * limit;
+    const db = getDb();
     const category = req.query.category as string | undefined;
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+    const offset = parseInt(req.query.offset as string) || 0;
 
-    const conditions = category
-      ? and(eq(forumPosts.isDeleted, false), eq(forumPosts.category, category as any))
-      : eq(forumPosts.isDeleted, false);
+    let query = db.select({
+      id: forumPosts.id, authorId: forumPosts.authorId, title: forumPosts.title,
+      content: forumPosts.content, category: forumPosts.category,
+      isPinned: forumPosts.isPinned, isLocked: forumPosts.isLocked,
+      createdAt: forumPosts.createdAt, updatedAt: forumPosts.updatedAt,
+      authorName: users.fullName, authorUsername: users.username, authorImage: users.profileImage,
+    }).from(forumPosts).innerJoin(users, eq(forumPosts.authorId, users.id));
 
-    const posts = await db
-      .select({
-        id: forumPosts.id,
-        title: forumPosts.title,
-        content: forumPosts.content,
-        category: forumPosts.category,
-        userId: forumPosts.userId,
-        userName: users.fullName,
-        authorUsername: users.username,
-        userAvatar: users.avatarUrl,
-        commentCount: forumPosts.commentCount,
-        flagCount: forumPosts.flagCount,
-        createdAt: forumPosts.createdAt,
-        updatedAt: forumPosts.updatedAt,
-      })
-      .from(forumPosts)
-      .leftJoin(users, eq(forumPosts.userId, users.id))
-      .where(conditions)
-      .orderBy(desc(forumPosts.createdAt))
-      .limit(limit)
-      .offset(offset);
+    if (category) query = query.where(eq(forumPosts.category, category)) as any;
+    const posts = await (query as any).orderBy(desc(forumPosts.isPinned), desc(forumPosts.createdAt)).limit(limit).offset(offset);
 
-    const [countResult] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(forumPosts)
-      .where(conditions);
+    // Compute comment counts
+    const postIds = posts.map((p: any) => p.id);
+    let commentCounts: Record<number, number> = {};
+    if (postIds.length > 0) {
+      const counts = await db.select({ postId: forumComments.postId, count: count() })
+        .from(forumComments).where(sql`${forumComments.postId} = ANY(${postIds})`)
+        .groupBy(forumComments.postId);
+      for (const c of counts) commentCounts[c.postId] = Number(c.count);
+    }
 
-    res.json({
-      posts,
-      pagination: {
-        page,
-        limit,
-        total: countResult?.count ?? 0,
-        totalPages: Math.ceil((countResult?.count ?? 0) / limit),
-      },
-    });
-  } catch (err) {
-    next(err);
-  }
+    res.json(posts.map((p: any) => ({ ...p, commentCount: commentCounts[p.id] ?? 0 })));
+  } catch (err) { next(err); }
 });
 
-// GET /api/forum/posts/:id — single post with comments (Public)
-router.get('/posts/:id', async (req, res, next) => {
+// ─── Single post ────────────────────────────────────────────────────────────
+router.get("/posts/:id", async (req, res, next) => {
   try {
+    const db = getDb();
     const postId = parseInt(req.params.id!, 10);
-    if (isNaN(postId)) throw new AppError(400, 'Invalid post ID');
+    const [post] = await db.select({
+      id: forumPosts.id, authorId: forumPosts.authorId, title: forumPosts.title,
+      content: forumPosts.content, category: forumPosts.category,
+      isPinned: forumPosts.isPinned, isLocked: forumPosts.isLocked,
+      createdAt: forumPosts.createdAt, updatedAt: forumPosts.updatedAt,
+      authorName: users.fullName, authorUsername: users.username, authorImage: users.profileImage,
+    }).from(forumPosts).innerJoin(users, eq(forumPosts.authorId, users.id)).where(eq(forumPosts.id, postId));
+    if (!post) { res.status(404).json({ error: "Post not found" }); return; }
 
-    const [post] = await db
-      .select({
-        id: forumPosts.id,
-        title: forumPosts.title,
-        content: forumPosts.content,
-        category: forumPosts.category,
-        userId: forumPosts.userId,
-        userName: users.fullName,
-        authorUsername: users.username,
-        userAvatar: users.avatarUrl,
-        commentCount: forumPosts.commentCount,
-        createdAt: forumPosts.createdAt,
-        updatedAt: forumPosts.updatedAt,
-      })
-      .from(forumPosts)
-      .leftJoin(users, eq(forumPosts.userId, users.id))
-      .where(and(eq(forumPosts.id, postId), eq(forumPosts.isDeleted, false)))
-      .limit(1);
+    const comments = await db.select({
+      id: forumComments.id, authorId: forumComments.authorId, content: forumComments.content,
+      createdAt: forumComments.createdAt, authorName: users.fullName, authorUsername: users.username, authorImage: users.profileImage,
+    }).from(forumComments).innerJoin(users, eq(forumComments.authorId, users.id)).where(eq(forumComments.postId, postId)).orderBy(forumComments.createdAt);
 
-    if (!post) throw new AppError(404, 'Post not found');
-
-    const comments = await db
-      .select({
-        id: forumComments.id,
-        content: forumComments.content,
-        userId: forumComments.userId,
-        userName: users.fullName,
-        authorUsername: users.username,
-        userAvatar: users.avatarUrl,
-        createdAt: forumComments.createdAt,
-      })
-      .from(forumComments)
-      .leftJoin(users, eq(forumComments.userId, users.id))
-      .where(
-        and(eq(forumComments.postId, postId), eq(forumComments.isDeleted, false)),
-      )
-      .orderBy(forumComments.createdAt);
-
-    res.json({ ...post, comments });
-  } catch (err) {
-    next(err);
-  }
+    const [commentCount] = await db.select({ count: count() }).from(forumComments).where(eq(forumComments.postId, postId));
+    res.json({ ...post, commentCount: Number(commentCount?.count ?? 0), comments });
+  } catch (err) { next(err); }
 });
 
-// POST /api/forum/posts — create post (Auth, Announcements admin-only)
-router.post(
-  '/posts',
-  checkJwt,
-  resolveUser,
-  validate(createPostSchema),
-  async (req, res, next) => {
-    try {
-      const { title, content, category } = req.body as z.infer<
-        typeof createPostSchema
-      >;
+// ─── Create post ────────────────────────────────────────────────────────────
+const createPostSchema = z.object({ title: z.string().min(1).max(255), content: z.string().min(1).max(10000), category: z.string().max(100).default("General") });
 
-      // Only admins can post in announcements
-      if (category === 'announcements' && req.user!.role !== 'admin') {
-        throw new AppError(
-          403,
-          'Only administrators can post in Announcements',
-        );
-      }
+router.post("/posts", requireAuth, validateBody(createPostSchema), async (req, res, next) => {
+  try {
+    const db = getDb();
+    const [post] = await db.insert(forumPosts).values({
+      authorId: req.user!.id, title: req.body.title, content: req.body.content, category: req.body.category,
+    }).returning();
+    res.status(201).json(post);
+  } catch (err) { next(err); }
+});
 
-      const [post] = await db
-        .insert(forumPosts)
-        .values({
-          title,
-          content,
-          category,
-          userId: req.user!.id,
-        })
-        .returning();
+// ─── Create comment ─────────────────────────────────────────────────────────
+const createCommentSchema = z.object({ content: z.string().min(1).max(5000) });
 
-      logger.info(
-        { postId: post!.id, userId: req.user!.id, category },
-        'Forum post created',
-      );
-      res.status(201).json(post);
-    } catch (err) {
-      next(err);
-    }
-  },
-);
+router.post("/posts/:id/comments", requireAuth, validateBody(createCommentSchema), async (req, res, next) => {
+  try {
+    const db = getDb();
+    const postId = parseInt(req.params.id!, 10);
+    const [post] = await db.select({ id: forumPosts.id, isLocked: forumPosts.isLocked }).from(forumPosts).where(eq(forumPosts.id, postId));
+    if (!post) { res.status(404).json({ error: "Post not found" }); return; }
+    if (post.isLocked) { res.status(403).json({ error: "Post is locked" }); return; }
+    const [comment] = await db.insert(forumComments).values({ postId, authorId: req.user!.id, content: req.body.content }).returning();
+    res.status(201).json(comment);
+  } catch (err) { next(err); }
+});
 
-// POST /api/forum/posts/:id/comments — add comment (Auth)
-router.post(
-  '/posts/:id/comments',
-  checkJwt,
-  resolveUser,
-  validate(createCommentSchema),
-  async (req, res, next) => {
-    try {
-      const postId = parseInt(req.params.id!, 10);
-      if (isNaN(postId)) throw new AppError(400, 'Invalid post ID');
+// ─── Flag content ───────────────────────────────────────────────────────────
+const flagSchema = z.object({ postId: z.number().int().optional(), commentId: z.number().int().optional(), reason: z.string().min(1).max(1000) });
 
-      const [post] = await db
-        .select({ id: forumPosts.id })
-        .from(forumPosts)
-        .where(and(eq(forumPosts.id, postId), eq(forumPosts.isDeleted, false)))
-        .limit(1);
-      if (!post) throw new AppError(404, 'Post not found');
-
-      const { content } = req.body as z.infer<typeof createCommentSchema>;
-      const [comment] = await db
-        .insert(forumComments)
-        .values({
-          postId,
-          content,
-          userId: req.user!.id,
-        })
-        .returning();
-
-      // Increment comment count
-      await db
-        .update(forumPosts)
-        .set({ commentCount: sql`${forumPosts.commentCount} + 1` })
-        .where(eq(forumPosts.id, postId));
-
-      logger.info(
-        { commentId: comment!.id, postId, userId: req.user!.id },
-        'Forum comment created',
-      );
-      res.status(201).json(comment);
-    } catch (err) {
-      next(err);
-    }
-  },
-);
-
-// POST /api/forum/posts/:id/flag — flag post (Auth)
-router.post(
-  '/posts/:id/flag',
-  checkJwt,
-  resolveUser,
-  validate(flagSchema),
-  async (req, res, next) => {
-    try {
-      const postId = parseInt(req.params.id!, 10);
-      if (isNaN(postId)) throw new AppError(400, 'Invalid post ID');
-      const { reason } = req.body as z.infer<typeof flagSchema>;
-
-      await db.insert(forumFlags).values({
-        postId,
-        reason,
-        reporterId: req.user!.id,
-      });
-
-      // Increment flag count
-      await db
-        .update(forumPosts)
-        .set({ flagCount: sql`${forumPosts.flagCount} + 1` })
-        .where(eq(forumPosts.id, postId));
-
-      res.json({ message: 'Post flagged for review' });
-    } catch (err) {
-      next(err);
-    }
-  },
-);
-
-// POST /api/forum/comments/:id/flag — flag comment (Auth)
-router.post(
-  '/comments/:id/flag',
-  checkJwt,
-  resolveUser,
-  validate(flagSchema),
-  async (req, res, next) => {
-    try {
-      const commentId = parseInt(req.params.id!, 10);
-      if (isNaN(commentId)) throw new AppError(400, 'Invalid comment ID');
-      const { reason } = req.body as z.infer<typeof flagSchema>;
-
-      await db.insert(forumFlags).values({
-        commentId,
-        reason,
-        reporterId: req.user!.id,
-      });
-
-      // Increment flag count on comment
-      await db
-        .update(forumComments)
-        .set({ flagCount: sql`${forumComments.flagCount} + 1` })
-        .where(eq(forumComments.id, commentId));
-
-      res.json({ message: 'Comment flagged for review' });
-    } catch (err) {
-      next(err);
-    }
-  },
-);
+router.post("/flags", requireAuth, validateBody(flagSchema), async (req, res, next) => {
+  try {
+    const db = getDb();
+    if (!req.body.postId && !req.body.commentId) { res.status(400).json({ error: "Provide postId or commentId" }); return; }
+    const [flag] = await db.insert(forumFlags).values({
+      reporterId: req.user!.id, postId: req.body.postId ?? null, commentId: req.body.commentId ?? null, reason: req.body.reason,
+    }).returning();
+    res.status(201).json(flag);
+  } catch (err) { next(err); }
+});
 
 export default router;
