@@ -1,5 +1,7 @@
+import { relations } from "drizzle-orm";
 import {
   boolean,
+  index,
   integer,
   jsonb,
   pgEnum,
@@ -10,29 +12,20 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 
-export const userRoleEnum = pgEnum("user_role", ["client", "reader", "admin"]);
+// ─── Enums ──────────────────────────────────────────────────────────────────
 
-export const users = pgTable("users", {
-  id: serial("id").primaryKey(),
-  auth0Id: varchar("auth0_id", { length: 255 }).unique(),
-  email: varchar("email", { length: 255 }).notNull(),
-  username: varchar("username", { length: 50 }).unique(),
-  fullName: varchar("full_name", { length: 255 }),
-  role: userRoleEnum("role").notNull().default("client"),
-  bio: text("bio"),
-  specialties: text("specialties"),
-  profileImage: text("profile_image"),
-  pricingChat: integer("pricing_chat").notNull().default(0),
-  pricingVoice: integer("pricing_voice").notNull().default(0),
-  pricingVideo: integer("pricing_video").notNull().default(0),
-  accountBalance: integer("account_balance").notNull().default(0),
-  isOnline: boolean("is_online").notNull().default(false),
-  stripeAccountId: varchar("stripe_account_id", { length: 255 }),
-  stripeCustomerId: varchar("stripe_customer_id", { length: 255 }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const userRoleEnum = pgEnum("user_role", [
+  "client",
+  "reader",
+  "admin",
+]);
 
-export const readingTypeEnum = pgEnum("reading_type", ["chat", "voice", "video"]);
+export const readingTypeEnum = pgEnum("reading_type", [
+  "chat",
+  "voice",
+  "video",
+]);
+
 export const readingStatusEnum = pgEnum("reading_status", [
   "pending",
   "accepted",
@@ -41,65 +34,18 @@ export const readingStatusEnum = pgEnum("reading_status", [
   "cancelled",
 ]);
 
-export const readings = pgTable("readings", {
-  id: serial("id").primaryKey(),
-  readerId: integer("reader_id").notNull().references(() => users.id),
-  clientId: integer("client_id").notNull().references(() => users.id),
-  type: readingTypeEnum("type").notNull(),
-  status: readingStatusEnum("status").notNull().default("pending"),
-  pricePerMinute: integer("price_per_minute").notNull(),
-  channelName: varchar("channel_name", { length: 255 }).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  startedAt: timestamp("started_at", { withTimezone: true }),
-  completedAt: timestamp("completed_at", { withTimezone: true }),
-  duration: integer("duration").notNull().default(0),
-  totalPrice: integer("total_price").notNull().default(0),
-  paymentStatus: varchar("payment_status", { length: 50 }).notNull().default("unpaid"),
-  billedMinutes: integer("billed_minutes").notNull().default(0),
-  chatTranscript: jsonb("chat_transcript").$type<
-    Array<{ senderId: number; senderName: string; content: string; timestamp: string }>
-  >(),
-  rating: integer("rating"),
-  review: text("review"),
-});
+export const paymentStatusEnum = pgEnum("payment_status", [
+  "pending",
+  "paid",
+  "refunded",
+]);
 
 export const transactionTypeEnum = pgEnum("transaction_type", [
   "top_up",
   "reading_charge",
-  "paid_message",
   "payout",
   "adjustment",
 ]);
-
-export const transactions = pgTable("transactions", {
-  id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().references(() => users.id),
-  type: transactionTypeEnum("type").notNull(),
-  amount: integer("amount").notNull(),
-  balanceBefore: integer("balance_before").notNull(),
-  balanceAfter: integer("balance_after").notNull(),
-  readingId: integer("reading_id").references(() => readings.id),
-  messageId: integer("message_id"),
-  stripeId: varchar("stripe_id", { length: 255 }),
-  note: text("note"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
-
-export const messages = pgTable("messages", {
-  id: serial("id").primaryKey(),
-  senderId: integer("sender_id").notNull().references(() => users.id),
-  receiverId: integer("receiver_id").notNull().references(() => users.id),
-  parentMessageId: integer("parent_message_id").references(() => messages.id),
-  content: text("content").notNull(),
-  isPaid: boolean("is_paid").notNull().default(false),
-  price: integer("price"),
-  readerAmount: integer("reader_amount"),
-  platformAmount: integer("platform_amount"),
-  isUnlocked: boolean("is_unlocked").notNull().default(true),
-  unlockedAt: timestamp("unlocked_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  readAt: timestamp("read_at", { withTimezone: true }),
-});
 
 export const forumCategoryEnum = pgEnum("forum_category", [
   "General",
@@ -109,30 +55,250 @@ export const forumCategoryEnum = pgEnum("forum_category", [
   "Announcements",
 ]);
 
-export const forumPosts = pgTable("forum_posts", {
-  id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().references(() => users.id),
-  title: varchar("title", { length: 200 }).notNull(),
-  content: text("content").notNull(),
-  category: forumCategoryEnum("category").notNull(),
-  flagCount: integer("flag_count").notNull().default(0),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+// ─── Users ──────────────────────────────────────────────────────────────────
 
-export const forumComments = pgTable("forum_comments", {
-  id: serial("id").primaryKey(),
-  postId: integer("post_id").notNull().references(() => forumPosts.id),
-  userId: integer("user_id").notNull().references(() => users.id),
-  content: text("content").notNull(),
-  flagCount: integer("flag_count").notNull().default(0),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const users = pgTable(
+  "users",
+  {
+    id: serial("id").primaryKey(),
+    auth0Id: varchar("auth0_id", { length: 255 }).unique().notNull(),
+    email: varchar("email", { length: 255 }).unique().notNull(),
+    username: varchar("username", { length: 50 }).unique(),
+    fullName: varchar("full_name", { length: 255 }),
+    role: userRoleEnum("role").notNull().default("client"),
+    bio: text("bio"),
+    specialties: text("specialties"),
+    profileImage: varchar("profile_image", { length: 512 }),
+    pricingChat: integer("pricing_chat").notNull().default(0),
+    pricingVoice: integer("pricing_voice").notNull().default(0),
+    pricingVideo: integer("pricing_video").notNull().default(0),
+    accountBalance: integer("account_balance").notNull().default(0),
+    isOnline: boolean("is_online").notNull().default(false),
+    stripeAccountId: varchar("stripe_account_id", { length: 255 }),
+    stripeCustomerId: varchar("stripe_customer_id", { length: 255 }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    roleIdx: index("users_role_idx").on(table.role),
+    isOnlineIdx: index("users_is_online_idx").on(table.isOnline),
+  }),
+);
 
-export const forumFlags = pgTable("forum_flags", {
-  id: serial("id").primaryKey(),
-  postId: integer("post_id").references(() => forumPosts.id),
-  commentId: integer("comment_id").references(() => forumComments.id),
-  reporterId: integer("reporter_id").notNull().references(() => users.id),
-  reason: text("reason").notNull(),
-  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
-});
+// ─── Readings ───────────────────────────────────────────────────────────────
+
+export const readings = pgTable(
+  "readings",
+  {
+    id: serial("id").primaryKey(),
+    readerId: integer("reader_id")
+      .notNull()
+      .references(() => users.id),
+    clientId: integer("client_id")
+      .notNull()
+      .references(() => users.id),
+    type: readingTypeEnum("type").notNull(),
+    status: readingStatusEnum("status").notNull().default("pending"),
+    pricePerMinute: integer("price_per_minute").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    duration: integer("duration").notNull().default(0),
+    totalPrice: integer("total_price").notNull().default(0),
+    paymentStatus: paymentStatusEnum("payment_status")
+      .notNull()
+      .default("pending"),
+    chatTranscript: jsonb("chat_transcript").$type<Array<{ sender: string; message: string; timestamp: string }>>(),
+    rating: integer("rating"),
+    review: text("review"),
+    channelName: varchar("channel_name", { length: 255 }).notNull(),
+    billedMinutes: integer("billed_minutes").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    clientIdIdx: index("readings_client_id_idx").on(table.clientId),
+    readerIdIdx: index("readings_reader_id_idx").on(table.readerId),
+    statusIdx: index("readings_status_idx").on(table.status),
+    createdAtIdx: index("readings_created_at_idx").on(table.createdAt),
+  }),
+);
+
+// ─── Transactions ───────────────────────────────────────────────────────────
+
+export const transactions = pgTable(
+  "transactions",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    type: transactionTypeEnum("type").notNull(),
+    amount: integer("amount").notNull(),
+    balanceBefore: integer("balance_before").notNull(),
+    balanceAfter: integer("balance_after").notNull(),
+    readingId: integer("reading_id").references(() => readings.id),
+    stripeId: varchar("stripe_id", { length: 255 }),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    userIdIdx: index("transactions_user_id_idx").on(table.userId),
+    readingIdIdx: index("transactions_reading_id_idx").on(table.readingId),
+    typeIdx: index("transactions_type_idx").on(table.type),
+    createdAtIdx: index("transactions_created_at_idx").on(table.createdAt),
+  }),
+);
+
+// ─── Forum Posts ────────────────────────────────────────────────────────────
+
+export const forumPosts = pgTable(
+  "forum_posts",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    title: varchar("title", { length: 200 }).notNull(),
+    content: text("content").notNull(),
+    category: forumCategoryEnum("category").notNull(),
+    flagCount: integer("flag_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    userIdIdx: index("forum_posts_user_id_idx").on(table.userId),
+    categoryIdx: index("forum_posts_category_idx").on(table.category),
+    createdAtIdx: index("forum_posts_created_at_idx").on(table.createdAt),
+  }),
+);
+
+// ─── Forum Comments ─────────────────────────────────────────────────────────
+
+export const forumComments = pgTable(
+  "forum_comments",
+  {
+    id: serial("id").primaryKey(),
+    postId: integer("post_id")
+      .notNull()
+      .references(() => forumPosts.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    content: text("content").notNull(),
+    flagCount: integer("flag_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    postIdIdx: index("forum_comments_post_id_idx").on(table.postId),
+    userIdIdx: index("forum_comments_user_id_idx").on(table.userId),
+  }),
+);
+
+// ─── Forum Flags ────────────────────────────────────────────────────────────
+
+export const forumFlags = pgTable(
+  "forum_flags",
+  {
+    id: serial("id").primaryKey(),
+    postId: integer("post_id").references(() => forumPosts.id, {
+      onDelete: "cascade",
+    }),
+    commentId: integer("comment_id").references(() => forumComments.id, {
+      onDelete: "cascade",
+    }),
+    reporterId: integer("reporter_id")
+      .notNull()
+      .references(() => users.id),
+    reason: text("reason").notNull(),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    postIdIdx: index("forum_flags_post_id_idx").on(table.postId),
+    commentIdIdx: index("forum_flags_comment_id_idx").on(table.commentId),
+    reporterIdIdx: index("forum_flags_reporter_id_idx").on(table.reporterId),
+  }),
+);
+
+// ─── Relations ──────────────────────────────────────────────────────────────
+
+export const usersRelations = relations(users, ({ many }) => ({
+  clientReadings: many(readings, { relationName: "clientReadings" }),
+  readerReadings: many(readings, { relationName: "readerReadings" }),
+  transactions: many(transactions),
+  forumPosts: many(forumPosts),
+  forumComments: many(forumComments),
+  forumFlags: many(forumFlags),
+}));
+
+export const readingsRelations = relations(readings, ({ one, many }) => ({
+  client: one(users, {
+    fields: [readings.clientId],
+    references: [users.id],
+    relationName: "clientReadings",
+  }),
+  reader: one(users, {
+    fields: [readings.readerId],
+    references: [users.id],
+    relationName: "readerReadings",
+  }),
+  transactions: many(transactions),
+}));
+
+export const transactionsRelations = relations(transactions, ({ one }) => ({
+  user: one(users, {
+    fields: [transactions.userId],
+    references: [users.id],
+  }),
+  reading: one(readings, {
+    fields: [transactions.readingId],
+    references: [readings.id],
+  }),
+}));
+
+export const forumPostsRelations = relations(forumPosts, ({ one, many }) => ({
+  author: one(users, {
+    fields: [forumPosts.userId],
+    references: [users.id],
+  }),
+  comments: many(forumComments),
+  flags: many(forumFlags),
+}));
+
+export const forumCommentsRelations = relations(
+  forumComments,
+  ({ one }) => ({
+    post: one(forumPosts, {
+      fields: [forumComments.postId],
+      references: [forumPosts.id],
+    }),
+    author: one(users, {
+      fields: [forumComments.userId],
+      references: [users.id],
+    }),
+  }),
+);
+
+export const forumFlagsRelations = relations(forumFlags, ({ one }) => ({
+  post: one(forumPosts, {
+    fields: [forumFlags.postId],
+    references: [forumPosts.id],
+  }),
+  comment: one(forumComments, {
+    fields: [forumFlags.commentId],
+    references: [forumComments.id],
+  }),
+  reporter: one(users, {
+    fields: [forumFlags.reporterId],
+    references: [users.id],
+  }),
+}));
