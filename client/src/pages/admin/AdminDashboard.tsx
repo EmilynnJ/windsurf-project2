@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '../../hooks/useAuth';
 import AdminLayout from './AdminLayout';
 
 interface AdminStats {
@@ -22,10 +21,14 @@ interface AdminStats {
 }
 
 const AdminDashboard: React.FC = () => {
-  const { logout } = useAuth();
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    window.location.href = '/login';
+  };
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -66,7 +69,7 @@ const AdminDashboard: React.FC = () => {
 
   if (loading) {
     return (
-      <AdminLayout onLogout={logout}>
+      <AdminLayout onLogout={handleLogout}>
         <div className="flex justify-center items-center h-64">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
         </div>
@@ -76,7 +79,7 @@ const AdminDashboard: React.FC = () => {
 
   if (error) {
     return (
-      <AdminLayout onLogout={logout}>
+      <AdminLayout onLogout={handleLogout}>
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
           <p className="text-red-600">Error loading dashboard: {error}</p>
         </div>
@@ -86,7 +89,7 @@ const AdminDashboard: React.FC = () => {
 
   if (!stats) {
     return (
-      <AdminLayout onLogout={logout}>
+      <AdminLayout onLogout={handleLogout}>
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
           <p className="text-yellow-600">No data available</p>
         </div>
@@ -95,7 +98,7 @@ const AdminDashboard: React.FC = () => {
   }
 
   return (
-    <AdminLayout onLogout={logout}>
+    <AdminLayout onLogout={handleLogout}>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         {/* Total Users Card */}
         <div className="bg-white rounded-lg shadow p-6">
