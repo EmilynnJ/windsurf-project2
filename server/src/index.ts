@@ -7,6 +7,13 @@ import pinoHttp from "pino-http";
 import { getPool } from "./db/db";
 import authRoutes from "./routes/auth";
 import paymentRoutes from "./payment/payment-routes";
+import userRoutes from "./routes/users";
+import readerRoutes from "./routes/readers";
+import balanceRoutes from "./routes/balance";
+import profileImageRoutes from "./routes/profile-image";
+import readingRoutes from "./routes/readings";
+import messageRoutes from "./routes/messages";
+import { GracePeriodService } from "./services/grace-period-service";
 
 const app = express();
 
@@ -32,9 +39,34 @@ app.get("/api/db-check", async (_req, res) => {
 // API routes
 app.use("/api/auth", authRoutes);
 app.use("/api/payment", paymentRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/readers", readerRoutes);
+app.use("/api/balance", balanceRoutes);
+app.use("/api/profile-image", profileImageRoutes);
+app.use("/api/readings", readingRoutes);
+app.use("/api/messages", messageRoutes);
 
 const port = Number(process.env.PORT ?? 3001);
-app.listen(port, () => {
+const server = app.listen(port, () => {
   // eslint-disable-next-line no-console
   console.log(`Server listening on http://localhost:${port}`);
+});
+
+// Clean up grace period service on shutdown
+process.on('SIGTERM', () => {
+  console.log('Received SIGTERM, cleaning up...');
+  GracePeriodService.cleanup();
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('Received SIGINT, cleaning up...');
+  GracePeriodService.cleanup();
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
 });

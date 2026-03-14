@@ -92,7 +92,7 @@ router.get('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
       return res.status(404).json({ error: 'User not found' });
     }
 
-    const user = userResult[0];
+    const user = userResult[0]!;
     
     // Only return sensitive information to the user themselves or admins
     if (req.user?.id !== user.id && req.user?.role !== 'admin') {
@@ -142,7 +142,7 @@ router.put('/me', authMiddleware, async (req: AuthenticatedRequest, res: Respons
       .set({
         ...validatedData,
         // Prevent users from changing their own role unless they're admin
-        role: validatedData.role && req.user.role === 'admin' ? validatedData.role : existingUser[0].role,
+        role: validatedData.role && req.user.role === 'admin' ? validatedData.role : existingUser[0]!.role,
       })
       .where(eq(users.id, req.user.id))
       .returning({
@@ -231,11 +231,11 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res: Response)
     }).from(users);
 
     // Apply filters
+    const conditions = [];
     if (validatedParams.q) {
-      query = query.where(ilike(users.username, `%${validatedParams.q}%`));
+      conditions.push(ilike(users.username, `%${validatedParams.q}%`));
     }
 
-    const conditions = [];
     if (validatedParams.role) {
       conditions.push(eq(users.role, validatedParams.role));
     }
@@ -467,7 +467,7 @@ router.get('/all/:role?', authMiddleware, async (req: AuthenticatedRequest, res:
 
     const db = getDb();
     
-    let query = db.select({
+    const usersList = await db.select({
       id: users.id,
       auth0Id: users.auth0Id,
       email: users.email,
@@ -483,13 +483,8 @@ router.get('/all/:role?', authMiddleware, async (req: AuthenticatedRequest, res:
       accountBalance: users.accountBalance,
       isOnline: users.isOnline,
       createdAt: users.createdAt,
-    }).from(users);
-
-    if (role) {
-      query = query.where(eq(users.role, role));
-    }
-
-    const usersList = await query
+    }).from(users)
+      .where(role ? eq(users.role, role as 'client' | 'reader' | 'admin') : undefined)
       .limit(Number(limit))
       .offset(Number(offset));
 

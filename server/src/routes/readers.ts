@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import { eq, and, or, ilike } from 'drizzle-orm';
+import { eq, and, or, ilike, gte, lte } from 'drizzle-orm';
 import { getDb } from '../db/db';
 import { users } from '@soulseer/shared/schema';
 import { authMiddleware } from '../middleware/auth';
@@ -63,10 +63,10 @@ router.get('/', async (req: AuthenticatedRequest, res: Response) => {
       pricingVideo: users.pricingVideo,
       isOnline: users.isOnline,
       createdAt: users.createdAt,
-    }).from(users).where(eq(users.role, 'reader'));
+    }).from(users);
 
     // Apply filters
-    const conditions = [];
+    const conditions = [eq(users.role, 'reader' as const)];
 
     if (validatedParams.q) {
       conditions.push(ilike(users.username, `%${validatedParams.q}%`));
@@ -79,20 +79,20 @@ router.get('/', async (req: AuthenticatedRequest, res: Response) => {
     if (typeof validatedParams.minPrice === 'number') {
       conditions.push(
         or(
-          users.pricingChat >= validatedParams.minPrice,
-          users.pricingVoice >= validatedParams.minPrice,
-          users.pricingVideo >= validatedParams.minPrice
-        )
+          gte(users.pricingChat, validatedParams.minPrice),
+          gte(users.pricingVoice, validatedParams.minPrice),
+          gte(users.pricingVideo, validatedParams.minPrice)
+        )!
       );
     }
 
     if (typeof validatedParams.maxPrice === 'number') {
       conditions.push(
         or(
-          users.pricingChat <= validatedParams.maxPrice,
-          users.pricingVoice <= validatedParams.maxPrice,
-          users.pricingVideo <= validatedParams.maxPrice
-        )
+          lte(users.pricingChat, validatedParams.maxPrice),
+          lte(users.pricingVoice, validatedParams.maxPrice),
+          lte(users.pricingVideo, validatedParams.maxPrice)
+        )!
       );
     }
 
@@ -100,9 +100,7 @@ router.get('/', async (req: AuthenticatedRequest, res: Response) => {
       conditions.push(eq(users.isOnline, validatedParams.isOnline));
     }
 
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions));
-    }
+    query = query.where(and(...conditions)) as typeof query;
 
     // Apply pagination
     const readers = await query

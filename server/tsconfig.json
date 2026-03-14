@@ -3,7 +3,8 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
-    "types": ["node"],
+    "types": ["node", "express", "multer"],
+    "typeRoots": ["./node_modules/@types", "../node_modules/@types"],
     "moduleResolution": "Bundler",
     "baseUrl": ".",
     "paths": {

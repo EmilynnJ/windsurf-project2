@@ -1,5 +1,6 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
+import * as schema from "@soulseer/shared/schema";
 
 let pool: Pool | undefined;
 
@@ -15,5 +16,7 @@ export function getPool(): Pool {
 }
 
 export function getDb() {
-  return drizzle(getPool());
+  return drizzle(getPool(), { schema });
 }
+
+export const db = getDb();
