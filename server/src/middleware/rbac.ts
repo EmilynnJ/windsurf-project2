@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/db';
-import { users, readings } from '@soulseer/shared/schema';
+import { users, readings } from '../db/schema';
 import { logger } from '../utils/logger';
 import '../types';
 

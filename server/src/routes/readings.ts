@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { eq, and } from 'drizzle-orm';
 import { db } from '../db/db';
-import { users, readings } from '@soulseer/shared/schema';
+import { users, readings } from '../db/schema';
 import { checkJwt } from '../middleware/auth';
 import { resolveUser, requireRole, requireParticipant } from '../middleware/rbac';
 import { validate } from '../middleware/validate';
@@ -54,12 +54,12 @@ router.post(
 
       const [reading] = await db.insert(readings).values({
         readerId, clientId: client.id, type, status: 'pending', pricePerMinute,
-        channelName: 'pending',
+        agoraChannelName: 'pending',
         chatTranscript: type === 'chat' ? [] : null,
       }).returning();
 
-      const channelName = `reading_${reading!.id}`;
-      const [updated] = await db.update(readings).set({ channelName })
+      const agoraChannelName = `reading_${reading!.id}`;
+      const [updated] = await db.update(readings).set({ agoraChannelName })
         .where(eq(readings.id, reading!.id)).returning();
 
       wsService.send(readerId, 'reading:requested', {
@@ -99,7 +99,7 @@ router.post('/:id/agora-token', checkJwt, resolveUser, requireParticipant, async
     if (reading.status !== 'accepted' && reading.status !== 'in_progress') {
       throw new AppError(400, 'Reading must be accepted or in progress');
     }
-    const tokens = AgoraService.generateTokens(reading.channelName, req.user!.id, 'publisher');
+    const tokens = AgoraService.generateTokens(reading.agoraChannelName!, req.user!.id, 'publisher');
     res.json(tokens);
   } catch (err) { next(err); }
 });

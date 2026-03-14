@@ -1,5 +1,5 @@
 import type { InferSelectModel } from 'drizzle-orm';
-import type { users, readings } from '@soulseer/shared/schema';
+import type { users, readings } from './db/schema';
 import type { AuthResult } from 'express-oauth2-jwt-bearer';
 
 export type User = InferSelectModel<typeof users>;
