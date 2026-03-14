@@ -47,7 +47,7 @@ const mockReader: Reader = {
 };
 
 export function ReaderProfilePage() {
-  const { id } = useParams();
+  useParams();
   const reader = mockReader;
 
   return (

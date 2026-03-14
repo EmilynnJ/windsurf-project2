@@ -5,6 +5,7 @@ This document outlines all the API endpoints for the user system in SoulSeer, in
 ## Authentication
 
 All protected endpoints require a valid JWT token in the Authorization header:
+
 ```
 Authorization: Bearer <token>
 ```
@@ -12,11 +13,13 @@ Authorization: Bearer <token>
 ## User Management Endpoints
 
 ### GET /api/users/:id
+
 Get a user's profile by ID.
 
 **Permissions**: Authenticated users can view their own profile. Admins can view any user's profile. Other users only see public information.
 
 **Response**:
+
 ```json
 {
   "id": 1,
@@ -35,11 +38,13 @@ Get a user's profile by ID.
 ```
 
 ### PUT /api/users/me
+
 Update the authenticated user's profile.
 
 **Permissions**: Authenticated user can update their own profile.
 
 **Request Body**:
+
 ```json
 {
   "username": "newusername",
@@ -55,6 +60,7 @@ Update the authenticated user's profile.
 ```
 
 **Response**:
+
 ```json
 {
   "id": 1,
@@ -73,11 +79,13 @@ Update the authenticated user's profile.
 ```
 
 ### PATCH /api/users/me/online
+
 Toggle the user's online status.
 
 **Permissions**: Authenticated user can update their own status.
 
 **Request Body**:
+
 ```json
 {
   "isOnline": true
@@ -85,6 +93,7 @@ Toggle the user's online status.
 ```
 
 **Response**:
+
 ```json
 {
   "message": "User is now online",
@@ -96,11 +105,13 @@ Toggle the user's online status.
 ```
 
 ### GET /api/users
+
 Search users with filters.
 
 **Permissions**: Authenticated users can search users.
 
 **Query Parameters**:
+
 - `q`: Search term for username
 - `role`: Filter by role (client, reader, admin)
 - `isOnline`: Filter by online status (true/false)
@@ -108,6 +119,7 @@ Search users with filters.
 - `offset`: Offset for pagination (default: 0)
 
 **Response**:
+
 ```json
 {
   "users": [...],
@@ -118,11 +130,13 @@ Search users with filters.
 ```
 
 ### POST /api/users
+
 Create a new user (Admin only).
 
 **Permissions**: Admin only.
 
 **Request Body**:
+
 ```json
 {
   "email": "newuser@example.com",
@@ -140,6 +154,7 @@ Create a new user (Admin only).
 ```
 
 **Response**:
+
 ```json
 {
   "message": "User created successfully",
@@ -148,6 +163,7 @@ Create a new user (Admin only).
 ```
 
 ### PUT /api/users/:id
+
 Update any user (Admin only).
 
 **Permissions**: Admin only.
@@ -156,6 +172,7 @@ Update any user (Admin only).
 Same as PUT /api/users/me
 
 **Response**:
+
 ```json
 {
   "message": "User updated successfully",
@@ -164,11 +181,13 @@ Same as PUT /api/users/me
 ```
 
 ### DELETE /api/users/:id
+
 Delete a user (Admin only).
 
 **Permissions**: Admin only.
 
 **Response**:
+
 ```json
 {
   "message": "User deleted successfully"
@@ -176,15 +195,18 @@ Delete a user (Admin only).
 ```
 
 ### GET /api/users/all/:role?
+
 Get all users with optional role filter (Admin only).
 
 **Permissions**: Admin only.
 
 **Query Parameters**:
+
 - `limit`: Number of results to return (default: 20)
 - `offset`: Offset for pagination (default: 0)
 
 **Response**:
+
 ```json
 {
   "users": [...],
@@ -197,11 +219,13 @@ Get all users with optional role filter (Admin only).
 ## Reader Endpoints
 
 ### GET /api/readers
+
 Get all readers with filters.
 
 **Permissions**: Public access.
 
 **Query Parameters**:
+
 - `q`: Search term for username
 - `specialties`: Filter by specialties
 - `minPrice`: Minimum price filter
@@ -211,6 +235,7 @@ Get all readers with filters.
 - `offset`: Offset for pagination (default: 0)
 
 **Response**:
+
 ```json
 {
   "readers": [...],
@@ -221,11 +246,13 @@ Get all readers with filters.
 ```
 
 ### GET /api/readers/:id
+
 Get a specific reader by ID.
 
 **Permissions**: Public access.
 
 **Response**:
+
 ```json
 {
   "id": 1,
@@ -244,11 +271,13 @@ Get a specific reader by ID.
 ```
 
 ### PUT /api/readers/me
+
 Update the authenticated reader's profile.
 
 **Permissions**: Reader only.
 
 **Request Body**:
+
 ```json
 {
   "bio": "Updated bio",
@@ -262,6 +291,7 @@ Update the authenticated reader's profile.
 ```
 
 **Response**:
+
 ```json
 {
   "message": "Reader profile updated successfully",
@@ -270,11 +300,13 @@ Update the authenticated reader's profile.
 ```
 
 ### PATCH /api/readers/me/online
+
 Toggle the reader's online status.
 
 **Permissions**: Reader only.
 
 **Request Body**:
+
 ```json
 {
   "isOnline": true
@@ -282,6 +314,7 @@ Toggle the reader's online status.
 ```
 
 **Response**:
+
 ```json
 {
   "message": "Reader is now online",
@@ -293,11 +326,13 @@ Toggle the reader's online status.
 ```
 
 ### PATCH /api/readers/me/pricing
+
 Update the reader's pricing.
 
 **Permissions**: Reader only.
 
 **Request Body**:
+
 ```json
 {
   "pricingChat": 150,
@@ -307,6 +342,7 @@ Update the reader's pricing.
 ```
 
 **Response**:
+
 ```json
 {
   "message": "Reader pricing updated successfully",
@@ -322,11 +358,13 @@ Update the reader's pricing.
 ## Balance Management Endpoints
 
 ### GET /api/balance/me
+
 Get the authenticated user's balance.
 
 **Permissions**: Authenticated user.
 
 **Response**:
+
 ```json
 {
   "balance": 5000
@@ -334,11 +372,13 @@ Get the authenticated user's balance.
 ```
 
 ### POST /api/balance/top-up
+
 Top up the authenticated user's balance.
 
 **Permissions**: Authenticated user.
 
 **Request Body**:
+
 ```json
 {
   "amount": 1000,
@@ -347,6 +387,7 @@ Top up the authenticated user's balance.
 ```
 
 **Response**:
+
 ```json
 {
   "message": "Balance topped up successfully",
@@ -356,11 +397,13 @@ Top up the authenticated user's balance.
 ```
 
 ### PATCH /api/balance/adjust
+
 Adjust any user's balance (Admin only).
 
 **Permissions**: Admin only.
 
 **Request Body**:
+
 ```json
 {
   "userId": 1,
@@ -370,6 +413,7 @@ Adjust any user's balance (Admin only).
 ```
 
 **Response**:
+
 ```json
 {
   "message": "Balance adjusted successfully",
@@ -379,15 +423,18 @@ Adjust any user's balance (Admin only).
 ```
 
 ### GET /api/balance/transactions
+
 Get the authenticated user's transaction history.
 
 **Permissions**: Authenticated user.
 
 **Query Parameters**:
+
 - `limit`: Number of results to return (default: 20)
 - `offset`: Offset for pagination (default: 0)
 
 **Response**:
+
 ```json
 {
   "transactions": [...],
@@ -398,15 +445,18 @@ Get the authenticated user's transaction history.
 ```
 
 ### GET /api/balance/transactions/:userId
+
 Get any user's transaction history (Admin only).
 
 **Permissions**: Admin only.
 
 **Query Parameters**:
+
 - `limit`: Number of results to return (default: 20)
 - `offset`: Offset for pagination (default: 0)
 
 **Response**:
+
 ```json
 {
   "transactions": [...],
@@ -419,14 +469,17 @@ Get any user's transaction history (Admin only).
 ## Profile Image Endpoints
 
 ### POST /api/profile-image/upload
+
 Upload a profile image for the authenticated user.
 
 **Permissions**: Authenticated user.
 
 **Form Data**:
+
 - `image`: Image file (JPEG, PNG, GIF, WEBP, max 5MB)
 
 **Response**:
+
 ```json
 {
   "message": "Profile image uploaded successfully",
@@ -435,11 +488,13 @@ Upload a profile image for the authenticated user.
 ```
 
 ### DELETE /api/profile-image/remove
+
 Remove the authenticated user's profile image.
 
 **Permissions**: Authenticated user.
 
 **Response**:
+
 ```json
 {
   "message": "Profile image removed successfully"
@@ -447,14 +502,17 @@ Remove the authenticated user's profile image.
 ```
 
 ### POST /api/profile-image/upload/:userId
+
 Upload a profile image for any user (Admin only).
 
 **Permissions**: Admin only.
 
 **Form Data**:
+
 - `image`: Image file (JPEG, PNG, GIF, WEBP, max 5MB)
 
 **Response**:
+
 ```json
 {
   "message": "User profile image updated successfully",

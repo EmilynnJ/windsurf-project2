@@ -13,6 +13,7 @@ import balanceRoutes from "./routes/balance";
 import profileImageRoutes from "./routes/profile-image";
 import readingRoutes from "./routes/readings";
 import messageRoutes from "./routes/messages";
+import adminRoutes from "./routes/admin";
 import { GracePeriodService } from "./services/grace-period-service";
 
 const app = express();
@@ -45,6 +46,7 @@ app.use("/api/balance", balanceRoutes);
 app.use("/api/profile-image", profileImageRoutes);
 app.use("/api/readings", readingRoutes);
 app.use("/api/messages", messageRoutes);
+app.use("/api/admin", adminRoutes);
 
 const port = Number(process.env.PORT ?? 3001);
 const server = app.listen(port, () => {
