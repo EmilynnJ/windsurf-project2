@@ -1,0 +1,61 @@
+{
+  "mcpServers": {
+    "context7": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp"
+      ],
+      "env": {
+        "DEFAULT_MINIMUM_TOKENS": ""
+      }
+    },
+    "sequentialthinking": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    },
+    "puppeteer": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-puppeteer"
+      ]
+    },
+    "memory": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ]
+    },
+    "composer-trade": {
+      "command": "uvx",
+      "args": [
+        "composer-trade-mcp==0.1.4",
+        "--hash",
+        "sha256:37d8fcfd6ddc9c8155633f755159f3fcb1a63e7acc2a32513613341a851c84e2"
+      ],
+      "env": {
+        "COMPOSER_API_KEY": "",
+        "COMPOSER_SECRET_KEY": ""
+      }
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@0.0.38"
+      ]
+    },
+    "augment-context-engine": {
+      "command": "auggie",
+      "args": [
+        "--mcp",
+        "--mcp-auto-workspace"
+      ]
+    }
+  }
+}

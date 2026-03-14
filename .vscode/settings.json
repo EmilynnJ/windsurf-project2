@@ -1,0 +1,5 @@
+{
+    "codium.codeCompletion.enable": true,
+    "editor.tabCompletion": "on",
+    "diffEditor.codeLens": true
+}

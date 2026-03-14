@@ -4,7 +4,11 @@
     "rootDir": "src",
     "outDir": "dist",
     "types": ["node"],
-    "moduleResolution": "Bundler"
+    "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@soulseer/shared/*": ["../shared/src/*"]
+    }
   },
   "include": ["src"]
 }
