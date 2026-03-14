@@ -1,20 +1,26 @@
 import "dotenv/config";
+import "./types"; // load type augmentations
+
 import http from "http";
 import express from "express";
 import helmet from "helmet";
 import cors from "cors";
+import pinoHttp from "pino-http";
+
 import { config } from "./config";
 import { logger } from "./utils/logger";
 import { getPool } from "./db/db";
-import { stopAllBillingTimers } from "./services/billing-service";
-import { cleanupAllTimers } from "./services/reading-service";
+import { generalLimiter } from "./middleware/rate-limit";
+import { globalErrorHandler } from "./middleware/error-handler";
+import { wsService } from "./services/websocket-service";
+import { billingService } from "./services/billing-service";
 
 // ─── Route imports ──────────────────────────────────────────────────────────
 import authRoutes from "./routes/auth";
 import readersRoutes from "./routes/readers";
 import usersRoutes from "./routes/users";
 import readingRoutes from "./routes/readings";
-import paymentRoutes, { webhookRouter } from "./routes/payments";
+import paymentRoutes from "./routes/payments";
 import forumRoutes from "./routes/forum";
 import adminRoutes from "./routes/admin";
 
@@ -22,7 +28,10 @@ import adminRoutes from "./routes/admin";
 
 const app = express();
 
+// ── Security headers ─────────────────────────────────────────────────────
 app.use(helmet());
+
+// ── CORS ─────────────────────────────────────────────────────────────────
 app.use(
   cors({
     origin: config.corsOrigin.split(",").map((s) => s.trim()),
@@ -30,11 +39,29 @@ app.use(
   }),
 );
 
-// ── Stripe webhook MUST come BEFORE express.json() — needs raw body ──────
-app.use("/api/webhooks/stripe", webhookRouter);
+// ── Request logging ──────────────────────────────────────────────────────
+app.use(
+  pinoHttp({
+    logger,
+    autoLogging: {
+      ignore: (req) => req.url === "/api/health",
+    },
+  }),
+);
+
+// ── Global rate limit ────────────────────────────────────────────────────
+app.use(generalLimiter);
 
 // ── Body parsing ─────────────────────────────────────────────────────────
-app.use(express.json({ limit: "2mb" }));
+// NOTE: Stripe webhook needs raw body for signature verification.
+// We skip JSON parsing for that path.
+app.use((req, res, next) => {
+  if (req.path === "/api/payments/webhook") {
+    next();
+  } else {
+    express.json({ limit: "2mb" })(req, res, next);
+  }
+});
 app.use(express.urlencoded({ extended: false }));
 
 // ── Health check ─────────────────────────────────────────────────────────
@@ -56,9 +83,15 @@ app.use((_req, res) => {
   res.status(404).json({ error: "Not found" });
 });
 
-// ─── HTTP server ────────────────────────────────────────────────────────────
+// ── Global error handler (must be last) ──────────────────────────────────
+app.use(globalErrorHandler);
+
+// ─── HTTP server + WebSocket ────────────────────────────────────────────────
 
 const server = http.createServer(app);
+wsService.attach(server);
+
+// ─── Start ──────────────────────────────────────────────────────────────────
 
 server.listen(config.port, () => {
   logger.info(
@@ -71,8 +104,9 @@ server.listen(config.port, () => {
 
 function shutdown(signal: string) {
   logger.info({ signal }, "Shutdown signal received");
-  stopAllBillingTimers();
-  cleanupAllTimers();
+
+  billingService.shutdown();
+  wsService.shutdown();
 
   server.close(async () => {
     logger.info("HTTP server closed");
@@ -93,5 +127,13 @@ function shutdown(signal: string) {
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("uncaughtException", (err) => {
+  logger.fatal({ err }, "Uncaught exception");
+  shutdown("uncaughtException");
+});
+process.on("unhandledRejection", (reason) => {
+  logger.fatal({ reason }, "Unhandled rejection");
+  shutdown("unhandledRejection");
+});
 
 export { app, server };

@@ -1,18 +1,33 @@
 import { Router, Request, Response } from "express";
 import { z } from "zod";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
+import { db } from "../db/db";
 import { users } from "@soulseer/shared/schema";
-import { getDb } from "../db/db";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { checkJwt } from "../middleware/auth";
+import { resolveUser, requireRole } from "../middleware/rbac";
+import { validate } from "../middleware/validate";
 import { logger } from "../utils/logger";
+import { AppError } from "../middleware/error-handler";
 
 const router = Router();
 
-// ─── Schemas ─────────────────────────────────────────────────────────────────
+// ─── Public reader fields (never expose balance, stripe IDs, etc.) ──────────
 
-const updateStatusSchema = z.object({
-  isOnline: z.boolean(),
-});
+const publicReaderSelect = {
+  id: users.id,
+  username: users.username,
+  fullName: users.fullName,
+  bio: users.bio,
+  specialties: users.specialties,
+  profileImage: users.profileImage,
+  pricingChat: users.pricingChat,
+  pricingVoice: users.pricingVoice,
+  pricingVideo: users.pricingVideo,
+  isOnline: users.isOnline,
+  createdAt: users.createdAt,
+} as const;
+
+// ─── Schemas ─────────────────────────────────────────────────────────────────
 
 const updatePricingSchema = z.object({
   pricingChat: z.number().int().nonnegative().optional(),
@@ -21,157 +36,176 @@ const updatePricingSchema = z.object({
 });
 
 const updateProfileSchema = z.object({
-  bio: z.string().max(1000).optional(),
+  bio: z.string().max(2000).optional(),
   specialties: z.string().max(500).optional(),
+  profileImage: z.string().url().optional(),
 });
 
-// ─── GET /api/readers ───────────────────────────────────────────────────────
+const updateStatusSchema = z.object({
+  isOnline: z.boolean(),
+});
+
+// ─── GET /api/readers — Public. All reader profiles ─────────────────────────
 
 router.get("/", async (_req: Request, res: Response) => {
   try {
-    const db = getDb();
-    const readerList = await db
-      .select({
-        id: users.id,
-        username: users.username,
-        fullName: users.fullName,
-        bio: users.bio,
-        specialties: users.specialties,
-        profileImage: users.profileImage,
-        pricingChat: users.pricingChat,
-        pricingVoice: users.pricingVoice,
-        pricingVideo: users.pricingVideo,
-        isOnline: users.isOnline,
-        createdAt: users.createdAt,
-      })
+    const readers = await db
+      .select(publicReaderSelect)
       .from(users)
-      .where(eq(users.role, "reader"));
+      .where(eq(users.role, "reader"))
+      .orderBy(desc(users.isOnline), users.fullName);
 
-    return res.json({ readers: readerList });
+    return res.json({ readers });
   } catch (err) {
     logger.error({ err }, "Error fetching readers");
     return res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// ─── GET /api/readers/online ────────────────────────────────────────────────
+// ─── GET /api/readers/online — Public. Online readers only ──────────────────
 
 router.get("/online", async (_req: Request, res: Response) => {
   try {
-    const db = getDb();
-    const onlineReaders = await db
-      .select({
-        id: users.id,
-        username: users.username,
-        fullName: users.fullName,
-        bio: users.bio,
-        specialties: users.specialties,
-        profileImage: users.profileImage,
-        pricingChat: users.pricingChat,
-        pricingVoice: users.pricingVoice,
-        pricingVideo: users.pricingVideo,
-        isOnline: users.isOnline,
-        createdAt: users.createdAt,
-      })
+    const readers = await db
+      .select(publicReaderSelect)
       .from(users)
-      .where(and(eq(users.role, "reader"), eq(users.isOnline, true)));
+      .where(and(eq(users.role, "reader"), eq(users.isOnline, true)))
+      .orderBy(users.fullName);
 
-    return res.json({ readers: onlineReaders });
+    return res.json({ readers });
   } catch (err) {
     logger.error({ err }, "Error fetching online readers");
     return res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// ─── GET /api/readers/:id ───────────────────────────────────────────────────
+// ─── GET /api/readers/:id — Public. Single reader profile ───────────────────
 
 router.get("/:id", async (req: Request, res: Response) => {
   try {
     const id = Number(req.params.id);
-    if (isNaN(id)) return res.status(400).json({ error: "Invalid reader ID" });
+    if (isNaN(id) || id <= 0) {
+      return res.status(400).json({ error: "Invalid reader ID" });
+    }
 
-    const db = getDb();
-    const rows = await db
-      .select({
-        id: users.id,
-        username: users.username,
-        fullName: users.fullName,
-        bio: users.bio,
-        specialties: users.specialties,
-        profileImage: users.profileImage,
-        pricingChat: users.pricingChat,
-        pricingVoice: users.pricingVoice,
-        pricingVideo: users.pricingVideo,
-        isOnline: users.isOnline,
-        createdAt: users.createdAt,
-      })
+    const [reader] = await db
+      .select(publicReaderSelect)
       .from(users)
       .where(and(eq(users.id, id), eq(users.role, "reader")))
       .limit(1);
 
-    if (!rows[0]) return res.status(404).json({ error: "Reader not found" });
-    return res.json({ reader: rows[0] });
+    if (!reader) {
+      return res.status(404).json({ error: "Reader not found" });
+    }
+
+    return res.json({ reader });
   } catch (err) {
     logger.error({ err }, "Error fetching reader");
     return res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// ─── PATCH /api/readers/status — Reader only ────────────────────────────────
+// ─── PATCH /api/readers/status — Reader only. Toggle online/offline ─────────
 
-router.patch("/status", ...requireAuth, requireRole("reader"), async (req: Request, res: Response) => {
-  try {
-    const { isOnline } = updateStatusSchema.parse(req.body);
-    const db = getDb();
+router.patch(
+  "/status",
+  checkJwt,
+  resolveUser,
+  requireRole("reader"),
+  validate(updateStatusSchema),
+  async (req: Request, res: Response) => {
+    try {
+      const [updated] = await db
+        .update(users)
+        .set({ isOnline: req.body.isOnline })
+        .where(eq(users.id, req.user!.id))
+        .returning({ id: users.id, isOnline: users.isOnline });
 
-    await db.update(users).set({ isOnline }).where(eq(users.id, req.user!.id));
+      logger.info({ readerId: req.user!.id, isOnline: req.body.isOnline }, "Reader status updated");
+      return res.json({ reader: updated });
+    } catch (err) {
+      logger.error({ err }, "Error updating reader status");
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  },
+);
 
-    logger.info({ userId: req.user!.id, isOnline }, "Reader status updated");
-    return res.json({ message: "Status updated", isOnline });
-  } catch (err) {
-    if (err instanceof z.ZodError) return res.status(400).json({ error: "Invalid input", details: err.issues });
-    logger.error({ err }, "Error updating reader status");
-    return res.status(500).json({ error: "Internal server error" });
-  }
-});
+// ─── PATCH /api/readers/pricing — Reader only. Update per-type rates ────────
 
-// ─── PATCH /api/readers/pricing — Reader only ──────────────────────────────
+router.patch(
+  "/pricing",
+  checkJwt,
+  resolveUser,
+  requireRole("reader"),
+  validate(updatePricingSchema),
+  async (req: Request, res: Response) => {
+    try {
+      const fields: Record<string, number> = {};
+      if (req.body.pricingChat !== undefined) fields.pricingChat = req.body.pricingChat;
+      if (req.body.pricingVoice !== undefined) fields.pricingVoice = req.body.pricingVoice;
+      if (req.body.pricingVideo !== undefined) fields.pricingVideo = req.body.pricingVideo;
 
-router.patch("/pricing", ...requireAuth, requireRole("reader"), async (req: Request, res: Response) => {
-  try {
-    const body = updatePricingSchema.parse(req.body);
-    const db = getDb();
+      if (Object.keys(fields).length === 0) {
+        return res.status(400).json({ error: "At least one pricing field required" });
+      }
 
-    const updated = await db.update(users).set(body).where(eq(users.id, req.user!.id)).returning();
+      const [updated] = await db
+        .update(users)
+        .set(fields)
+        .where(eq(users.id, req.user!.id))
+        .returning({
+          id: users.id,
+          pricingChat: users.pricingChat,
+          pricingVoice: users.pricingVoice,
+          pricingVideo: users.pricingVideo,
+        });
 
-    logger.info({ userId: req.user!.id }, "Reader pricing updated");
-    return res.json({
-      pricingChat: updated[0]!.pricingChat,
-      pricingVoice: updated[0]!.pricingVoice,
-      pricingVideo: updated[0]!.pricingVideo,
-    });
-  } catch (err) {
-    if (err instanceof z.ZodError) return res.status(400).json({ error: "Invalid input", details: err.issues });
-    logger.error({ err }, "Error updating reader pricing");
-    return res.status(500).json({ error: "Internal server error" });
-  }
-});
+      logger.info({ readerId: req.user!.id, ...fields }, "Reader pricing updated");
+      return res.json({ reader: updated });
+    } catch (err) {
+      logger.error({ err }, "Error updating reader pricing");
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  },
+);
 
-// ─── PATCH /api/readers/profile — Reader only ──────────────────────────────
+// ─── PATCH /api/readers/profile — Reader only. Update bio/specialties ───────
 
-router.patch("/profile", ...requireAuth, requireRole("reader"), async (req: Request, res: Response) => {
-  try {
-    const body = updateProfileSchema.parse(req.body);
-    const db = getDb();
+router.patch(
+  "/profile",
+  checkJwt,
+  resolveUser,
+  requireRole("reader"),
+  validate(updateProfileSchema),
+  async (req: Request, res: Response) => {
+    try {
+      const fields: Record<string, string | undefined> = {};
+      if (req.body.bio !== undefined) fields.bio = req.body.bio;
+      if (req.body.specialties !== undefined) fields.specialties = req.body.specialties;
+      if (req.body.profileImage !== undefined) fields.profileImage = req.body.profileImage;
 
-    const updated = await db.update(users).set(body).where(eq(users.id, req.user!.id)).returning();
+      if (Object.keys(fields).length === 0) {
+        return res.status(400).json({ error: "At least one profile field required" });
+      }
 
-    return res.json({ bio: updated[0]!.bio, specialties: updated[0]!.specialties });
-  } catch (err) {
-    if (err instanceof z.ZodError) return res.status(400).json({ error: "Invalid input", details: err.issues });
-    logger.error({ err }, "Error updating reader profile");
-    return res.status(500).json({ error: "Internal server error" });
-  }
-});
+      const [updated] = await db
+        .update(users)
+        .set(fields)
+        .where(eq(users.id, req.user!.id))
+        .returning({
+          id: users.id,
+          bio: users.bio,
+          specialties: users.specialties,
+          profileImage: users.profileImage,
+        });
+
+      logger.info({ readerId: req.user!.id }, "Reader profile updated");
+      return res.json({ reader: updated });
+    } catch (err) {
+      logger.error({ err }, "Error updating reader profile");
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  },
+);
 
 export default router;
