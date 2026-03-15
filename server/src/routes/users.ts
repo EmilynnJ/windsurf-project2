@@ -80,9 +80,12 @@ router.patch("/me/pricing", requireAuth, async (req, res, next) => {
     const db = getDb();
     if (req.user!.role !== "reader") { res.status(403).json({ error: "Only readers" }); return; }
     const updates: Record<string, any> = {};
-    if (typeof req.body.pricingChat === "number") updates.pricingChat = Math.max(0, req.body.pricingChat);
-    if (typeof req.body.pricingVoice === "number") updates.pricingVoice = Math.max(0, req.body.pricingVoice);
-    if (typeof req.body.pricingVideo === "number") updates.pricingVideo = Math.max(0, req.body.pricingVideo);
+    if (typeof req.body.pricingChat === "number" && Number.isFinite(req.body.pricingChat))
+      updates.pricingChat = Math.trunc(Math.max(0, req.body.pricingChat));
+    if (typeof req.body.pricingVoice === "number" && Number.isFinite(req.body.pricingVoice))
+      updates.pricingVoice = Math.trunc(Math.max(0, req.body.pricingVoice));
+    if (typeof req.body.pricingVideo === "number" && Number.isFinite(req.body.pricingVideo))
+      updates.pricingVideo = Math.trunc(Math.max(0, req.body.pricingVideo));
     if (!Object.keys(updates).length) { res.status(400).json({ error: "No pricing fields" }); return; }
     updates.updatedAt = new Date();
     const [u] = await db.update(users).set(updates).where(eq(users.id, req.user!.id)).returning();
