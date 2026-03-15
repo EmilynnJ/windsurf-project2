@@ -58,18 +58,20 @@ class BillingService {
     }
 
     // Charge 1 minute atomically
-    await db.update(readings).set({
-      durationSeconds: sql`${readings.durationSeconds} + 60`,
-      totalCharged: sql`${readings.totalCharged} + ${rate}`,
-      readerEarned: sql`${readings.readerEarned} + ${Math.floor(rate * 0.70)}`,
-      platformEarned: sql`${readings.platformEarned} + ${rate - Math.floor(rate * 0.70)}`,
-      updatedAt: new Date(),
-    }).where(eq(readings.id, reading.id));
+    await db.transaction(async (tx) => {
+      await tx.update(readings).set({
+        durationSeconds: sql`${readings.durationSeconds} + 60`,
+        totalCharged: sql`${readings.totalCharged} + ${rate}`,
+        readerEarned: sql`${readings.readerEarned} + ${Math.floor(rate * 0.70)}`,
+        platformEarned: sql`${readings.platformEarned} + ${rate - Math.floor(rate * 0.70)}`,
+        updatedAt: new Date(),
+      }).where(eq(readings.id, reading.id));
 
-    await db.update(users).set({
-      balance: sql`${users.balance} - ${rate}`,
-      updatedAt: new Date(),
-    }).where(eq(users.id, reading.clientId));
+      await tx.update(users).set({
+        balance: sql`${users.balance} - ${rate}`,
+        updatedAt: new Date(),
+      }).where(eq(users.id, reading.clientId));
+    });
   }
 
   private async endReading(readingId: number, status: "completed" | "missed"): Promise<void> {
