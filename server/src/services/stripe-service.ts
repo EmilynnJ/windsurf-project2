@@ -10,6 +10,8 @@ import { AppError } from '../middleware/error-handler';
 const stripe = new Stripe(config.stripe.secretKey, { apiVersion: '2024-06-20' as any });
 
 export async function createPaymentIntent(userId: number, amountCents: number) {
+  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (!user) throw new AppError(404, 'User not found');
   if (amountCents < 500) throw new AppError(400, 'Min top-up $5.00');
   const pi = await stripe.paymentIntents.create({
     amount: amountCents, currency: 'usd',

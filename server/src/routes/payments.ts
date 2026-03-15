@@ -77,9 +77,9 @@ router.post("/payout", requireAuth, validateBody(payoutSchema), async (req, res,
     if (!reader?.stripeAccountId) { res.status(400).json({ error: "No Stripe Connect account" }); return; }
     if (reader.balance < 1500) { res.status(400).json({ error: "Min payout $15.00" }); return; }
     const amount = reader.balance;
+    const transfer = await stripe.transfers.create({ amount, currency: "usd", destination: reader.stripeAccountId, metadata: { readerId: String(reader.id) } });
     const result = await db.update(users).set({ balance: 0, updatedAt: new Date() }).where(sql`${users.id} = ${reader.id} AND ${users.balance} = ${amount}`).returning({ id: users.id });
     if (!result.length) { res.status(409).json({ error: "Balance changed, retry" }); return; }
-    const transfer = await stripe.transfers.create({ amount, currency: "usd", destination: reader.stripeAccountId, metadata: { readerId: String(reader.id) } });
     await db.insert(transactions).values({ userId: reader.id, type: "reader_payout", amount: -amount, balanceAfter: 0, stripePaymentIntentId: transfer.id, note: `Payout $${(amount / 100).toFixed(2)}` });
     res.json({ transferId: transfer.id, amount });
   } catch (err) { next(err); }
