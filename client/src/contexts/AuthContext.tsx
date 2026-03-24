@@ -9,6 +9,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const {
     isAuthenticated: auth0IsAuth,
     isLoading: auth0Loading,
+    user: auth0User,
     getAccessTokenSilently,
     loginWithRedirect,
     logout: auth0Logout,
@@ -18,7 +19,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   const refreshUser = useCallback(async () => {
-    if (!auth0IsAuth) {
+    if (!auth0IsAuth || !auth0User) {
       setUser(null);
       setIsLoading(false);
       return;
@@ -28,16 +29,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const token = await getAccessTokenSilently();
       apiService.setAccessToken(token);
 
-      // Sync user with backend (creates or updates)
-      const userData = await apiService.get<User>('/api/auth/me');
+      // First try /me — works for existing users
+      try {
+        const userData = await apiService.get<User>('/api/auth/me');
+        setUser(userData);
+        return;
+      } catch {
+        // User not found — need to sync/create
+      }
+
+      // Sync user with backend (creates or updates the user record)
+      const userData = await apiService.post<User>('/api/auth/callback', {
+        auth0Id: auth0User.sub,
+        email: auth0User.email,
+        fullName: auth0User.name,
+        profileImage: auth0User.picture,
+      });
       setUser(userData);
     } catch (err) {
-      console.error('Failed to fetch user profile:', err);
+      console.error('Failed to fetch/sync user profile:', err);
       setUser(null);
     } finally {
       setIsLoading(false);
     }
-  }, [auth0IsAuth, getAccessTokenSilently]);
+  }, [auth0IsAuth, auth0User, getAccessTokenSilently]);
 
   useEffect(() => {
     if (!auth0Loading) {

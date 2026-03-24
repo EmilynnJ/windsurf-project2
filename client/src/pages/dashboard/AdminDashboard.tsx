@@ -17,9 +17,10 @@ function centsToPrice(c: number): string {
 interface AdminUser {
   id: number;
   email: string;
-  displayName: string | null;
+  fullName: string | null;
+  username: string | null;
   role: 'client' | 'reader' | 'admin';
-  isActive: boolean;
+  isOnline: boolean;
   balance: number;
   createdAt: string;
   [key: string]: unknown;
@@ -29,10 +30,10 @@ interface AdminReading {
   id: number;
   clientId: number;
   readerId: number;
-  type: string;
+  readingType: string;
   status: string;
-  duration: number;
-  totalCost: number;
+  durationSeconds: number;
+  totalCharged: number;
   createdAt: string;
   [key: string]: unknown;
 }
@@ -42,14 +43,15 @@ interface AdminTransaction {
   userId: number;
   type: string;
   amount: number;
-  description: string | null;
+  note: string | null;
   createdAt: string;
   [key: string]: unknown;
 }
 
 interface FlaggedPost {
   id: number;
-  postId: number;
+  postId: number | null;
+  commentId: number | null;
   reporterId: number;
   reason: string;
   resolved: boolean;
@@ -90,7 +92,7 @@ export function AdminDashboard() {
   } | null>(null);
 
   // Create reader form
-  const [newReader, setNewReader] = useState({ email: '', displayName: '', password: '' });
+  const [newReader, setNewReader] = useState({ email: '', fullName: '', password: '' });
   const [creatingReader, setCreatingReader] = useState(false);
 
   // Balance adjust form
@@ -122,16 +124,16 @@ export function AdminDashboard() {
   /* ─── Handlers ──────────────────────────────────────────── */
 
   const handleCreateReader = async () => {
-    if (!newReader.email || !newReader.displayName) {
-      addToast('error', 'Email and display name are required');
+    if (!newReader.email || !newReader.fullName) {
+      addToast('error', 'Email and name are required');
       return;
     }
     setCreatingReader(true);
     try {
       await apiService.post('/api/admin/users/create-reader', newReader);
-      addToast('success', `Reader "${newReader.displayName}" created!`);
+      addToast('success', `Reader "${newReader.fullName}" created!`);
       setCreateReaderOpen(false);
-      setNewReader({ email: '', displayName: '', password: '' });
+      setNewReader({ email: '', fullName: '', password: '' });
       fetchAll();
     } catch (err: unknown) {
       addToast('error', err instanceof Error ? err.message : 'Failed to create reader');
@@ -142,12 +144,12 @@ export function AdminDashboard() {
 
   const handleToggleActive = async (user: AdminUser) => {
     setConfirmAction({
-      title: user.isActive ? 'Deactivate User' : 'Activate User',
-      message: `Are you sure you want to ${user.isActive ? 'deactivate' : 'activate'} ${user.email}?`,
+      title: user.isOnline ? 'Deactivate User' : 'Activate User',
+      message: `Are you sure you want to ${user.isOnline ? 'deactivate' : 'activate'} ${user.email}?`,
       onConfirm: async () => {
         try {
-          await apiService.patch(`/api/admin/users/${user.id}/status`, { isActive: !user.isActive });
-          addToast('success', `User ${user.isActive ? 'deactivated' : 'activated'}`);
+          await apiService.patch(`/api/admin/users/${user.id}/status`, { isActive: !user.isOnline });
+          addToast('success', `User ${user.isOnline ? 'deactivated' : 'activated'}`);
           fetchAll();
         } catch {
           addToast('error', 'Failed to update user status');
@@ -195,7 +197,8 @@ export function AdminDashboard() {
       const q = userSearch.toLowerCase();
       if (
         !(u.email ?? '').toLowerCase().includes(q) &&
-        !(u.displayName ?? '').toLowerCase().includes(q)
+        !(u.fullName ?? '').toLowerCase().includes(q) &&
+        !(u.username ?? '').toLowerCase().includes(q)
       ) return false;
     }
     if (userRoleFilter && u.role !== userRoleFilter) return false;
@@ -208,8 +211,8 @@ export function AdminDashboard() {
     { key: 'id', header: 'ID', width: '50px', sortable: true },
     { key: 'email', header: 'Email', sortable: true },
     {
-      key: 'displayName', header: 'Name',
-      render: (u) => <strong>{u.displayName || '—'}</strong>,
+      key: 'fullName', header: 'Name',
+      render: (u) => <strong>{u.fullName || u.username || '—'}</strong>,
     },
     {
       key: 'role', header: 'Role',
@@ -220,8 +223,8 @@ export function AdminDashboard() {
       ),
     },
     {
-      key: 'isActive', header: 'Status',
-      render: (u) => <Badge variant={u.isActive ? 'online' : 'danger'}>{u.isActive ? 'Active' : 'Inactive'}</Badge>,
+      key: 'isOnline', header: 'Status',
+      render: (u) => <Badge variant={u.isOnline ? 'online' : 'danger'}>{u.isOnline ? 'Online' : 'Offline'}</Badge>,
     },
     {
       key: 'balance', header: 'Balance', sortable: true,
@@ -234,8 +237,8 @@ export function AdminDashboard() {
           <Button size="sm" variant="secondary" onClick={() => setAdjustBalanceUser(u)}>
             Adjust $
           </Button>
-          <Button size="sm" variant={u.isActive ? 'danger' : 'primary'} onClick={() => handleToggleActive(u)}>
-            {u.isActive ? 'Deactivate' : 'Activate'}
+          <Button size="sm" variant={u.isOnline ? 'danger' : 'primary'} onClick={() => handleToggleActive(u)}>
+            {u.isOnline ? 'Deactivate' : 'Activate'}
           </Button>
         </div>
       ),
@@ -246,17 +249,20 @@ export function AdminDashboard() {
     { key: 'id', header: 'ID', width: '50px', sortable: true },
     { key: 'clientId', header: 'Client', render: (r) => `#${r.clientId}` },
     { key: 'readerId', header: 'Reader', render: (r) => `#${r.readerId}` },
-    { key: 'type', header: 'Type', render: (r) => <Badge variant="pink">{r.type}</Badge> },
+    { key: 'readingType', header: 'Type', render: (r) => <Badge variant="pink">{r.readingType}</Badge> },
     {
       key: 'status', header: 'Status',
       render: (r) => (
-        <Badge variant={r.status === 'completed' ? 'online' : r.status === 'in_progress' ? 'info' : 'gold'}>
+        <Badge variant={r.status === 'completed' ? 'online' : r.status === 'active' ? 'info' : 'gold'}>
           {r.status}
         </Badge>
       ),
     },
-    { key: 'duration', header: 'Duration', render: (r) => r.duration > 0 ? `${r.duration} min` : '—' },
-    { key: 'totalCost', header: 'Revenue', sortable: true, render: (r) => <span className="price price--sm">{centsToPrice(r.totalCost)}</span> },
+    {
+      key: 'durationSeconds', header: 'Duration',
+      render: (r) => r.durationSeconds > 0 ? `${Math.floor(r.durationSeconds / 60)}m ${r.durationSeconds % 60}s` : '—',
+    },
+    { key: 'totalCharged', header: 'Revenue', sortable: true, render: (r) => <span className="price price--sm">{centsToPrice(r.totalCharged)}</span> },
     { key: 'createdAt', header: 'Date', sortable: true, render: (r) => new Date(r.createdAt).toLocaleDateString() },
   ];
 
@@ -265,20 +271,26 @@ export function AdminDashboard() {
     { key: 'userId', header: 'User', render: (t) => `#${t.userId}` },
     {
       key: 'type', header: 'Type',
-      render: (t) => <Badge variant={t.type === 'top_up' ? 'online' : t.type === 'reading_charge' ? 'pink' : 'gold'}>{t.type.replace(/_/g, ' ')}</Badge>,
+      render: (t) => {
+        const labels: Record<string, string> = {
+          topup: 'Top Up', reading_charge: 'Reading', reader_payout: 'Payout',
+          refund: 'Refund', admin_adjustment: 'Adjustment',
+        };
+        return <Badge variant={t.type === 'topup' ? 'online' : t.type === 'reading_charge' ? 'pink' : 'gold'}>{labels[t.type] || t.type}</Badge>;
+      },
     },
     {
       key: 'amount', header: 'Amount', sortable: true,
       render: (t) => <span className={`price price--sm ${t.amount >= 0 ? 'price--positive' : 'price--negative'}`}>{t.amount >= 0 ? '+' : ''}{centsToPrice(Math.abs(t.amount))}</span>,
     },
-    { key: 'description', header: 'Description', render: (t) => t.description || '—' },
+    { key: 'note', header: 'Description', render: (t) => t.note || '—' },
     { key: 'createdAt', header: 'Date', sortable: true, render: (t) => new Date(t.createdAt).toLocaleDateString() },
   ];
 
   if (loading) return <LoadingPage message="Loading admin dashboard..." />;
 
-  const totalRevenue = readings.reduce((s, r) => s + (r.totalCost || 0), 0);
-  const onlineReaders = users.filter((u) => u.role === 'reader' && u.isActive).length;
+  const totalRevenue = readings.reduce((s, r) => s + (r.totalCharged || 0), 0);
+  const onlineReaders = users.filter((u) => u.role === 'reader' && u.isOnline).length;
   const unresolvedFlags = flags.filter((f) => !f.resolved).length;
 
   return (
@@ -291,7 +303,7 @@ export function AdminDashboard() {
         <Stat
           label="Flagged"
           value={unresolvedFlags}
-          icon="🛡️"
+          icon={unresolvedFlags > 0 ? '⚠️' : '✅'}
         />
       </div>
 
@@ -318,7 +330,9 @@ export function AdminDashboard() {
                 {flags.filter((f) => !f.resolved).slice(0, 5).map((f) => (
                   <div key={f.id} className="flex items-center justify-between" style={{ padding: 'var(--space-3)', background: 'var(--surface-card)', borderRadius: 'var(--radius-sm)' }}>
                     <div>
-                      <p style={{ fontSize: '0.85rem' }}>Post #{f.postId}</p>
+                      <p style={{ fontSize: '0.85rem' }}>
+                        {f.postId ? `Post #${f.postId}` : `Comment #${f.commentId}`}
+                      </p>
                       <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{f.reason}</p>
                     </div>
                     <Button size="sm" variant="primary" onClick={() => handleResolveFlag(f.id)}>
@@ -394,7 +408,7 @@ export function AdminDashboard() {
                       <Badge variant={f.resolved ? 'online' : 'danger'}>
                         {f.resolved ? 'Resolved' : 'Pending'}
                       </Badge>
-                      <span>Post #{f.postId}</span>
+                      <span>{f.postId ? `Post #${f.postId}` : `Comment #${f.commentId}`}</span>
                     </div>
                     <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: 'var(--space-1)' }}>
                       Reported by #{f.reporterId}: {f.reason}
@@ -441,9 +455,9 @@ export function AdminDashboard() {
             required
           />
           <Input
-            label="Display Name"
-            value={newReader.displayName}
-            onChange={(e) => setNewReader((p) => ({ ...p, displayName: e.target.value }))}
+            label="Full Name"
+            value={newReader.fullName}
+            onChange={(e) => setNewReader((p) => ({ ...p, fullName: e.target.value }))}
             required
           />
           <Input

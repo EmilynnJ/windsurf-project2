@@ -12,7 +12,7 @@ import { logger } from "../utils/logger";
 
 const router = Router();
 
-// ── GET /api/users/readers — Public reader list (for browse page) ───────
+// ── GET /api/readers — Public reader list (for browse page) ───────
 router.get("/readers", async (_req, res, next) => {
   try {
     const db = getDb();
@@ -40,7 +40,7 @@ router.get("/readers", async (_req, res, next) => {
   }
 });
 
-// ── GET /api/users/readers/:id — Single reader public profile ───────────
+// ── GET /api/readers/:id — Single reader public profile ───────────
 router.get("/readers/:id", async (req, res, next) => {
   try {
     const db = getDb();
@@ -113,7 +113,7 @@ router.get("/readers/:id", async (req, res, next) => {
 });
 
 // ── GET /api/users/me — Authenticated user profile ──────────────────────
-router.get("/me", checkJwt, async (req, res, next) => {
+router.get("/users/me", checkJwt, async (req, res, next) => {
   try {
     if (!req.user) {
       res.status(401).json({ error: "Not authenticated" });
@@ -128,7 +128,7 @@ router.get("/me", checkJwt, async (req, res, next) => {
 });
 
 // ── PATCH /api/users/me — Update current user profile ───────────────────
-router.patch("/me", checkJwt, async (req, res, next) => {
+router.patch("/users/me", checkJwt, async (req, res, next) => {
   try {
     const db = getDb();
     const userId = req.user!.id;
@@ -162,7 +162,7 @@ router.patch("/me", checkJwt, async (req, res, next) => {
 });
 
 // ── PATCH /api/users/me/online — Toggle reader online status ────────────
-router.patch("/me/online", checkJwt, async (req, res, next) => {
+router.patch("/users/me/online", checkJwt, async (req, res, next) => {
   try {
     const db = getDb();
     const userId = req.user!.id;
@@ -185,7 +185,7 @@ router.patch("/me/online", checkJwt, async (req, res, next) => {
 });
 
 // ── PATCH /api/users/me/pricing — Update reader pricing ────────────────
-router.patch("/me/pricing", checkJwt, async (req, res, next) => {
+router.patch("/users/me/pricing", checkJwt, async (req, res, next) => {
   try {
     const db = getDb();
     const userId = req.user!.id;

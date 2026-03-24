@@ -2,7 +2,7 @@
 // Reading Routes — On-demand reading flow, Agora tokens, chat
 // ============================================================
 
-import { Router } from "express";
+import { Router, type Request, type Response, type NextFunction } from "express";
 import { eq, and, or, desc } from "drizzle-orm";
 import { z } from "zod";
 
@@ -27,74 +27,148 @@ router.use(checkJwt);
 // ── POST /api/readings/on-demand — Request an on-demand reading ──────────
 const onDemandSchema = z.object({
   readerId: z.number().int().positive(),
-  type: z.enum(["chat", "voice", "video"]),
+  readingType: z.enum(["chat", "voice", "video"]),
 });
 
-router.post(
-  "/on-demand",
-  requireRole("client"),
-  validate(onDemandSchema),
-  async (req, res, next) => {
-    try {
-      const db = getDb();
-      const client = req.user!;
-      const { readerId, type } = req.body;
+// Shared handler for creating on-demand readings
+const onDemandHandler = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const client = req.user!;
+    const { readerId, readingType: type } = req.body;
 
-      // Get reader
-      const [reader] = await db
-        .select()
-        .from(users)
-        .where(and(eq(users.id, readerId), eq(users.role, "reader")));
-      if (!reader) throw new AppError(404, "Reader not found");
-      if (!reader.isOnline) throw new AppError(400, "Reader is not currently online");
+    // Get reader
+    const [reader] = await db
+      .select()
+      .from(users)
+      .where(and(eq(users.id, readerId), eq(users.role, "reader")));
+    if (!reader) throw new AppError(404, "Reader not found");
+    if (!reader.isOnline) throw new AppError(400, "Reader is not currently online");
 
-      // Get rate
-      const ratePerMinute =
-        type === "chat" ? reader.pricingChat
-        : type === "voice" ? reader.pricingVoice
-        : reader.pricingVideo;
-      if (ratePerMinute <= 0) throw new AppError(400, `This reader does not offer ${type} readings`);
+    // Get rate
+    const ratePerMinute =
+      type === "chat" ? reader.pricingChat
+      : type === "voice" ? reader.pricingVoice
+      : reader.pricingVideo;
+    if (ratePerMinute <= 0) throw new AppError(400, `This reader does not offer ${type} readings`);
 
-      // Check balance
-      if (client.balance < MIN_BALANCE_CENTS) {
-        throw new AppError(400, `Minimum balance of $5.00 required. Current balance: $${(client.balance / 100).toFixed(2)}`);
-      }
-
-      // Create reading
-      const [reading] = await db
-        .insert(readings)
-        .values({
-          clientId: client.id,
-          readerId,
-          readingType: type,
-          status: "pending",
-          ratePerMinute,
-          agoraChannel: "pending",
-        })
-        .returning();
-
-      // Set channel name
-      const agoraChannel = `reading_${reading!.id}`;
-      const [updated] = await db
-        .update(readings)
-        .set({ agoraChannel })
-        .where(eq(readings.id, reading!.id))
-        .returning();
-
-      // Notify reader
-      wsService.send(readerId, "reading:request", {
-        readingId: updated!.id,
-        clientName: client.fullName ?? client.username,
-        type,
-        ratePerMinute,
-      });
-
-      res.status(201).json(updated);
-    } catch (err) {
-      next(err);
+    // Check balance
+    if (client.balance < MIN_BALANCE_CENTS) {
+      throw new AppError(400, `Minimum balance of $5.00 required. Current balance: $${(client.balance / 100).toFixed(2)}`);
     }
-  },
-);
+
+    // Create reading
+    const [reading] = await db
+      .insert(readings)
+      .values({
+        clientId: client.id,
+        readerId,
+        readingType: type,
+        status: "pending",
+        ratePerMinute,
+        agoraChannel: "pending",
+      })
+      .returning();
+
+    // Set channel name
+    const agoraChannel = `reading_${reading!.id}`;
+    const [updated] = await db
+      .update(readings)
+      .set({ agoraChannel })
+      .where(eq(readings.id, reading!.id))
+      .returning();
+
+    // Notify reader
+    wsService.send(readerId, "reading:request", {
+      readingId: updated!.id,
+      clientName: client.fullName ?? client.username,
+      type,
+      ratePerMinute,
+    });
+
+    res.status(201).json(updated);
+  } catch (err) {
+    next(err);
+  }
+};
+
+router.post("/on-demand", requireRole("client"), validate(onDemandSchema), onDemandHandler);
+
+// ── GET /api/readings/:id — Get single reading details ─────────────────
+router.get("/:id", async (req, res, next) => {
+  try {
+    const db = getDb();
+    const readingId = parseInt(req.params.id!, 10);
+    const userId = req.user!.id;
+
+    const [reading] = await db
+      .select()
+      .from(readings)
+      .where(eq(readings.id, readingId));
+    if (!reading) throw new AppError(404, "Reading not found");
+    if (reading.clientId !== userId && reading.readerId !== userId) {
+      throw new AppError(403, "You are not a participant in this reading");
+    }
+
+    // Get participant names
+    const [reader] = await db.select({ fullName: users.fullName, username: users.username, profileImage: users.profileImage }).from(users).where(eq(users.id, reading.readerId));
+    const [client] = await db.select({ fullName: users.fullName, username: users.username }).from(users).where(eq(users.id, reading.clientId));
+
+    res.json({
+      ...reading,
+      readerName: reader?.fullName ?? reader?.username ?? 'Reader',
+      clientName: client?.fullName ?? client?.username ?? 'Client',
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── GET /api/readings/:id/messages — Get chat messages ─────────────────
+router.get("/:id/messages", async (req, res, next) => {
+  try {
+    // Chat messages would be stored in a separate table or in-memory
+    // For now return empty array - messages are handled via WebSocket
+    res.json([]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── POST /api/readings/:id/messages — Send chat message ────────────────
+router.post("/:id/messages", async (req, res, next) => {
+  try {
+    const readingId = parseInt(req.params.id!, 10);
+    const userId = req.user!.id;
+    const { content } = req.body;
+
+    // Broadcast via WebSocket
+    const db = getDb();
+    const [reading] = await db.select().from(readings).where(eq(readings.id, readingId));
+    if (!reading) throw new AppError(404, "Reading not found");
+    if (reading.clientId !== userId && reading.readerId !== userId) {
+      throw new AppError(403, "Not a participant");
+    }
+
+    const message = {
+      id: Date.now(),
+      senderId: userId,
+      content,
+      createdAt: new Date().toISOString(),
+    };
+
+    // Send to both participants
+    const otherId = userId === reading.clientId ? reading.readerId : reading.clientId;
+    wsService.send(otherId, "chat:message", { readingId, message });
+
+    res.status(201).json(message);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── POST /api/readings — Alias for on-demand (client sends here) ───────
+router.post("/", requireRole("client"), validate(onDemandSchema), onDemandHandler);
 
 // ── POST /api/readings/:id/accept — Reader accepts reading ──────────────
 router.post("/:id/accept", requireRole("reader"), async (req, res, next) => {

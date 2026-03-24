@@ -17,16 +17,41 @@ import { requireRole } from "../middleware/rbac";
 import { validate } from "../middleware/validate";
 import { AppError } from "../middleware/error-handler";
 import { logger } from "../utils/logger";
+import { config } from "../config";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2024-06-20" as any,
-});
+// Stripe is optional — only initialize if key is present
+const stripe = config.stripe.secretKey
+  ? new Stripe(config.stripe.secretKey, { apiVersion: "2024-06-20" as any })
+  : null;
 
 const router = Router();
 
 // All admin routes require auth + admin role
 router.use(checkJwt);
 router.use(requireRole("admin"));
+
+// ── GET /api/admin/stats — Dashboard stats ─────────────────────────────
+router.get("/stats", async (_req, res, next) => {
+  try {
+    const db = getDb();
+
+    const [userCount] = await db.select({ count: count() }).from(users);
+    const [readerCount] = await db.select({ count: count() }).from(users).where(eq(users.role, "reader"));
+    const [readingCount] = await db.select({ count: count() }).from(readings);
+    const [activeReadingCount] = await db.select({ count: count() }).from(readings).where(eq(readings.status, "active"));
+    const [flagCount] = await db.select({ count: count() }).from(forumFlags).where(eq(forumFlags.resolved, false));
+
+    res.json({
+      totalUsers: Number(userCount?.count ?? 0),
+      totalReaders: Number(readerCount?.count ?? 0),
+      totalReadings: Number(readingCount?.count ?? 0),
+      activeReadings: Number(activeReadingCount?.count ?? 0),
+      pendingFlags: Number(flagCount?.count ?? 0),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // ── GET /api/admin/users — List all users ───────────────────────────────
 router.get("/users", async (_req, res, next) => {
@@ -96,43 +121,48 @@ router.post("/readers", validate(createReaderSchema), async (req, res, next) => 
       })
       .returning();
 
-    // Create Stripe Connect Express account
-    try {
-      const account = await stripe.accounts.create({
-        type: "express",
-        email: body.email,
-        metadata: { readerId: reader!.id.toString() },
-      });
+    // Create Stripe Connect Express account if Stripe is configured
+    if (stripe) {
+      try {
+        const account = await stripe.accounts.create({
+          type: "express",
+          email: body.email,
+          metadata: { readerId: reader!.id.toString() },
+        });
 
-      await db
-        .update(users)
-        .set({ stripeAccountId: account.id, updatedAt: new Date() })
-        .where(eq(users.id, reader!.id));
+        await db
+          .update(users)
+          .set({ stripeAccountId: account.id, updatedAt: new Date() })
+          .where(eq(users.id, reader!.id));
 
-      // Generate onboarding link
-      const accountLink = await stripe.accountLinks.create({
-        account: account.id,
-        refresh_url: `${process.env.CLIENT_URL}/dashboard`,
-        return_url: `${process.env.CLIENT_URL}/dashboard`,
-        type: "account_onboarding",
-      });
+        // Generate onboarding link
+        const accountLink = await stripe.accountLinks.create({
+          account: account.id,
+          refresh_url: `${config.corsOrigin}/dashboard`,
+          return_url: `${config.corsOrigin}/dashboard`,
+          type: "account_onboarding",
+        });
 
-      logger.info({ readerId: reader!.id, stripeAccount: account.id }, "Reader Stripe Connect created");
+        logger.info({ readerId: reader!.id, stripeAccount: account.id }, "Reader Stripe Connect created");
 
-      res.status(201).json({
-        reader: { ...reader, stripeAccountId: account.id },
-        initialPassword,
-        stripeOnboardingUrl: accountLink.url,
-      });
-    } catch (stripeErr) {
-      logger.error({ err: stripeErr, readerId: reader!.id }, "Failed to create Stripe Connect");
-      res.status(201).json({
-        reader,
-        initialPassword,
-        stripeOnboardingUrl: null,
-        warning: "Reader created but Stripe Connect setup failed. Set up manually.",
-      });
+        res.status(201).json({
+          reader: { ...reader, stripeAccountId: account.id },
+          initialPassword,
+          stripeOnboardingUrl: accountLink.url,
+        });
+        return;
+      } catch (stripeErr) {
+        logger.error({ err: stripeErr, readerId: reader!.id }, "Failed to create Stripe Connect");
+      }
     }
+
+    // Return without Stripe if not configured or failed
+    res.status(201).json({
+      reader,
+      initialPassword,
+      stripeOnboardingUrl: null,
+      warning: stripe ? "Reader created but Stripe Connect setup failed." : "Stripe not configured.",
+    });
   } catch (err) {
     next(err);
   }
@@ -282,7 +312,7 @@ router.post(
 router.get("/flags", async (_req, res, next) => {
   try {
     const db = getDb();
-    const flags = await db
+    const result = await db
       .select({
         id: forumFlags.id,
         postId: forumFlags.postId,
@@ -298,7 +328,7 @@ router.get("/flags", async (_req, res, next) => {
       .where(eq(forumFlags.resolved, false))
       .orderBy(desc(forumFlags.createdAt));
 
-    res.json(flags);
+    res.json(result);
   } catch (err) {
     next(err);
   }

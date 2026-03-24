@@ -19,7 +19,7 @@ interface ReadingSession {
   id: number;
   readerId: number;
   clientId: number;
-  type: 'chat' | 'voice' | 'video';
+  readingType: 'chat' | 'voice' | 'video';
   status: string;
   ratePerMinute: number;
   readerName?: string;
@@ -149,7 +149,7 @@ export function ReadingSessionPage() {
   const [videoOff, setVideoOff] = useState(false);
   const [connected, setConnected] = useState(false);
 
-  const isActive = session?.status === 'in_progress';
+  const isActive = session?.status === 'active';
   const timer = useTimer(isActive && connected);
   const currentCost = useMemo(
     () => (timer.minutes + (timer.seconds % 60 > 0 ? 1 : 0)) * (session?.ratePerMinute ?? 0),
@@ -173,7 +173,7 @@ export function ReadingSessionPage() {
 
   // Initialize Agora for voice/video
   useEffect(() => {
-    if (!session || session.type === 'chat' || !session.agoraToken || !session.agoraChannel) return;
+    if (!session || session.readingType === 'chat' || !session.agoraToken || !session.agoraChannel) return;
     if (!user) return;
 
     const agoraClient = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
@@ -189,7 +189,7 @@ export function ReadingSessionPage() {
         );
 
         // Create local tracks
-        if (session.type === 'video') {
+        if (session.readingType === 'video') {
           const [audioTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
           setLocalAudio(audioTrack);
           setLocalVideo(videoTrack);
@@ -236,7 +236,7 @@ export function ReadingSessionPage() {
 
   // Poll for new messages in chat mode
   useEffect(() => {
-    if (!session || session.type !== 'chat' || !isActive) return;
+    if (!session || session.readingType !== 'chat' || !isActive) return;
     const interval = setInterval(async () => {
       try {
         const msgs = await apiService.get(`/api/readings/${session.id}/messages`);
@@ -246,7 +246,7 @@ export function ReadingSessionPage() {
       }
     }, 3000);
     return () => clearInterval(interval);
-  }, [session?.id, session?.type, isActive]);
+  }, [session?.id, session?.readingType, isActive]);
 
   const handleSendMessage = async (content: string) => {
     if (!session || !user) return;
@@ -331,7 +331,7 @@ export function ReadingSessionPage() {
               <strong>{otherName || 'Reading Session'}</strong>
               <div className="flex items-center gap-2">
                 <Badge variant={isActive ? 'online' : 'gold'}>
-                  {session.type === 'chat' ? '💬' : session.type === 'voice' ? '🎤' : '📹'} {session.type}
+                  {session.readingType === 'chat' ? '💬' : session.readingType === 'voice' ? '🎤' : '📹'} {session.readingType}
                 </Badge>
                 <Badge variant="info">{session.status}</Badge>
               </div>
@@ -362,7 +362,7 @@ export function ReadingSessionPage() {
 
       {/* ─── Session Body ─────────────────────────────────── */}
       <div style={{ flex: 1, overflow: 'hidden' }}>
-        {session.type === 'chat' ? (
+        {session.readingType === 'chat' ? (
           <div className="container" style={{ height: '100%' }}>
             <ChatPanel
               messages={messages}
@@ -383,7 +383,7 @@ export function ReadingSessionPage() {
             </div>
 
             {/* Local video (small PIP) */}
-            {session.type === 'video' && (
+            {session.readingType === 'video' && (
               <div className="session-av__local" ref={localVideoRef} />
             )}
 
@@ -396,7 +396,7 @@ export function ReadingSessionPage() {
               >
                 {muted ? '🔇' : '🎤'}
               </button>
-              {session.type === 'video' && (
+              {session.readingType === 'video' && (
                 <button
                   className={`session-av__btn ${videoOff ? 'session-av__btn--active' : ''}`}
                   onClick={toggleVideo}
@@ -423,7 +423,7 @@ export function ReadingSessionPage() {
         onClose={() => setConfirmEnd(false)}
         onConfirm={handleEndSession}
         title="End Reading Session"
-        message={`End this ${session.type} reading? Duration: ${timer.display}, Cost: ${centsToPrice(currentCost)}`}
+        message={`End this ${session.readingType} reading? Duration: ${timer.display}, Cost: ${centsToPrice(currentCost)}`}
         confirmLabel="End Session"
         variant="danger"
         loading={ending}

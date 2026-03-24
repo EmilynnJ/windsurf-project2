@@ -53,7 +53,7 @@ app.get('/api/db-check', async (_req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// API routes
+// API routes — user routes mounted at /api so readers are at /api/readers
 app.use('/api/auth', authRoutes);
 app.use('/api', userRoutes);
 app.use('/api/readings', readingRoutes);

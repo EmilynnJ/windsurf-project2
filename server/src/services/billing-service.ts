@@ -10,7 +10,7 @@
 // ============================================================
 
 import { eq, sql } from "drizzle-orm";
-import { db } from "../db/db";
+import { getDb } from "../db/db";
 import { users, readings, transactions } from "../db/schema";
 import { wsService } from "./websocket-service";
 import { logger } from "../utils/logger";
@@ -27,6 +27,8 @@ interface ActiveSession {
   intervalId: ReturnType<typeof setInterval>;
   startedAt: Date;
   totalBilled: number; // cents billed so far
+  totalReaderEarned: number; // cents reader earned so far
+  totalPlatformEarned: number; // cents platform earned so far
   tickCount: number;
   paused: boolean;
   pausedAt?: Date;
@@ -62,6 +64,8 @@ class BillingService {
       intervalId,
       startedAt: new Date(),
       totalBilled: 0,
+      totalReaderEarned: 0,
+      totalPlatformEarned: 0,
       tickCount: 0,
       paused: false,
     };
@@ -119,7 +123,10 @@ class BillingService {
     logger.info({ readingId }, "Billing resumed");
   }
 
-  /** End billing and finalize the reading */
+  /** End billing and finalize the reading.
+   *  NOTE: tick() already handles per-minute charges (client debit + reader credit).
+   *  endBilling() only finalizes the reading record — it does NOT re-credit the reader.
+   */
   async endBilling(readingId: number): Promise<void> {
     const session = this.sessions.get(readingId);
     if (!session) return;
@@ -131,71 +138,52 @@ class BillingService {
     }
     this.sessions.delete(readingId);
 
-    // Calculate final totals
+    // Use the running totals accumulated by tick() — no recalculation
     const now = new Date();
     const durationMs = now.getTime() - session.startedAt.getTime();
     const durationSeconds = Math.floor(durationMs / 1000);
-    const durationMinutes = Math.ceil(durationSeconds / 60);
-    const totalCharged = durationMinutes * session.ratePerMinute;
-    const readerEarned = Math.floor(totalCharged * (1 - PLATFORM_FEE_RATE));
-    const platformEarned = totalCharged - readerEarned;
 
     try {
-      // Using imported db instance
+      const db = getDb();
       await db.transaction(async (tx) => {
-        // Finalize reading record
+        // Finalize reading record with totals from tick()
         await tx
           .update(readings)
           .set({
             status: "completed",
             completedAt: now,
             durationSeconds,
-            totalCharged,
-            readerEarned,
-            platformEarned,
+            totalCharged: session.totalBilled,
+            readerEarned: session.totalReaderEarned,
+            platformEarned: session.totalPlatformEarned,
             updatedAt: now,
           })
           .where(eq(readings.id, readingId));
 
-        // Credit reader balance
+        // Increment reader's total readings count
         await tx
           .update(users)
           .set({
-            balance: sql`${users.balance} + ${readerEarned}`,
             totalReadings: sql`${users.totalReadings} + 1`,
             updatedAt: now,
           })
           .where(eq(users.id, session.readerId));
-
-        // Log transaction for reader
-        const [readerUser] = await tx
-          .select({ balance: users.balance })
-          .from(users)
-          .where(eq(users.id, session.readerId));
-        await tx.insert(transactions).values({
-          userId: session.readerId,
-          readingId,
-          type: "reading_charge",
-          amount: readerEarned,
-          balanceAfter: readerUser?.balance ?? 0,
-          note: `Reading #${readingId} earnings (${durationMinutes} min)`,
-        });
       });
 
       // Notify both parties
       const summary = {
         readingId,
         durationSeconds,
-        totalCharged,
-        readerEarned,
-        platformEarned,
+        totalCharged: session.totalBilled,
+        readerEarned: session.totalReaderEarned,
+        platformEarned: session.totalPlatformEarned,
       };
       wsService.send(session.clientId, "billing:ended", summary);
       wsService.send(session.readerId, "billing:ended", summary);
       logger.info(summary, "Billing finalized");
     } catch (err) {
       logger.error(
-        { err, readingId, durationSeconds, totalCharged },
+        { err, readingId, durationSeconds, totalBilled: session.totalBilled },
         "Failed to finalize billing",
       );
     }
@@ -211,7 +199,7 @@ class BillingService {
     const platformShare = ratePerMinute - readerShare;
 
     try {
-      // Using imported db instance
+      const db = getDb();
       await db.transaction(async (tx) => {
         // Deduct from client — with balance check
         const [updated] = await tx
@@ -230,7 +218,12 @@ class BillingService {
           logger.info({ readingId, clientId }, "Insufficient balance, ending session");
           wsService.send(clientId, "billing:insufficient_balance", { readingId });
           wsService.send(readerId, "billing:insufficient_balance", { readingId });
-          await this.endBilling(readingId);
+          // Schedule end outside transaction to avoid deadlock
+          setTimeout(() => {
+            this.endBilling(readingId).catch((err) => {
+              logger.error({ err, readingId }, "Failed to end billing after insufficient balance");
+            });
+          }, 0);
           return;
         }
 
@@ -254,7 +247,17 @@ class BillingService {
           .where(eq(users.id, readerId))
           .returning({ balance: users.balance });
 
-        // Update reading totals
+        // Log reader transaction
+        await tx.insert(transactions).values({
+          userId: readerId,
+          readingId,
+          type: "reading_charge",
+          amount: readerShare,
+          balanceAfter: readerUpdated?.balance ?? 0,
+          note: `Reading #${readingId} earnings`,
+        });
+
+        // Update reading totals incrementally
         await tx
           .update(readings)
           .set({
@@ -268,7 +271,10 @@ class BillingService {
           .where(eq(readings.id, readingId));
       });
 
+      // Update in-memory session totals
       session.totalBilled += ratePerMinute;
+      session.totalReaderEarned += readerShare;
+      session.totalPlatformEarned += platformShare;
       session.tickCount += 1;
 
       // Notify both parties of tick
