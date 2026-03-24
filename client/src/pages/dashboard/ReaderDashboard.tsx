@@ -31,6 +31,10 @@ function formatDuration(seconds: number): string {
   return `${m}m ${s}s`;
 }
 
+function centsToDisplay(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`;
+}
+
 /* ── Column Defs ────────────────────────────────────────────── */
 const sessionColumns: Column<Reading & Record<string, unknown>>[] = [
   {
@@ -40,31 +44,31 @@ const sessionColumns: Column<Reading & Record<string, unknown>>[] = [
     render: (row) => formatDate(row.createdAt as string),
   },
   {
-    key: 'type',
+    key: 'readingType',
     header: 'Type',
     render: (row) => {
       const icons: Record<string, string> = { chat: '💬', voice: '🎙️', video: '📹' };
-      const t = row.type as string;
+      const t = row.readingType as string;
       return `${icons[t] || ''} ${t.charAt(0).toUpperCase() + t.slice(1)}`;
     },
   },
   {
-    key: 'clientId',
+    key: 'clientName',
     header: 'Client',
-    render: (row) => `#${row.clientId}`,
+    render: (row) => (row.clientName as string) || `Client #${row.clientId}`,
   },
   {
-    key: 'duration',
+    key: 'durationSeconds',
     header: 'Duration',
-    render: (row) => formatDuration(row.duration as number),
+    render: (row) => formatDuration(row.durationSeconds as number),
   },
   {
-    key: 'readerEarnings',
+    key: 'readerEarned',
     header: 'Earned',
     sortable: true,
     render: (row) => (
       <span className="price price--positive">
-        +${(row.readerEarnings as number).toFixed(2)}
+        +{centsToDisplay(row.readerEarned as number)}
       </span>
     ),
   },
@@ -73,7 +77,7 @@ const sessionColumns: Column<Reading & Record<string, unknown>>[] = [
     header: 'Status',
     render: (row) => (
       <span className={`badge badge--${row.status === 'completed' ? 'gold' : 'info'}`}>
-        {(row.status as string).replace('_', ' ')}
+        {(row.status as string).charAt(0).toUpperCase() + (row.status as string).slice(1)}
       </span>
     ),
   },
@@ -87,27 +91,27 @@ export function ReaderDashboard() {
   const [isOnline, setIsOnline] = useState(user?.isOnline ?? false);
   const [toggling, setToggling] = useState(false);
 
-  // Rates
-  const [chatRate, setChatRate] = useState(String(user?.pricingChat ?? ''));
-  const [voiceRate, setVoiceRate] = useState(String(user?.pricingVoice ?? ''));
-  const [videoRate, setVideoRate] = useState(String(user?.pricingVideo ?? ''));
+  // Rates (in cents from server, display as dollars)
+  const [chatRate, setChatRate] = useState(String((user?.pricingChat ?? 0) / 100));
+  const [voiceRate, setVoiceRate] = useState(String((user?.pricingVoice ?? 0) / 100));
+  const [videoRate, setVideoRate] = useState(String((user?.pricingVideo ?? 0) / 100));
   const [savingRates, setSavingRates] = useState(false);
 
   // Data
   const [sessions, setSessions] = useState<Reading[]>([]);
-  const [reviews, setReviews] = useState<(Review & { clientName?: string })[]>([]);
+  const [reviews, setReviews] = useState<Review[]>([]);
   const [loadingData, setLoadingData] = useState(true);
 
   /* ── Load data ── */
   useEffect(() => {
     async function load() {
       try {
-        const [sessionData, reviewData] = await Promise.all([
+        const [sessionData, readerData] = await Promise.all([
           apiService.get<Reading[]>('/api/readings/my'),
-          apiService.get<(Review & { clientName?: string })[]>(`/api/readers/${user?.id}/reviews`).catch(() => []),
+          apiService.get<{ reviews?: Review[] }>(`/api/readers/${user?.id}`).catch(() => ({ reviews: [] })),
         ]);
         setSessions(sessionData);
-        setReviews(reviewData);
+        setReviews(readerData.reviews || []);
       } catch {
         addToast('error', 'Failed to load dashboard data');
       } finally {
@@ -122,7 +126,7 @@ export function ReaderDashboard() {
     setToggling(true);
     try {
       const newStatus = !isOnline;
-      await apiService.patch('/api/readers/me/status', { isOnline: newStatus });
+      await apiService.patch('/api/users/me/online', { isOnline: newStatus });
       setIsOnline(newStatus);
       addToast('success', newStatus ? 'You are now Online! ✨' : 'You are now Offline');
       if (refreshUser) refreshUser();
@@ -133,14 +137,14 @@ export function ReaderDashboard() {
     }
   }, [isOnline, addToast, refreshUser]);
 
-  /* ── Save rates ── */
+  /* ── Save rates (convert dollars to cents) ── */
   const handleSaveRates = useCallback(async () => {
     setSavingRates(true);
     try {
-      await apiService.patch('/api/readers/me/rates', {
-        pricingChat: parseFloat(chatRate) || 0,
-        pricingVoice: parseFloat(voiceRate) || 0,
-        pricingVideo: parseFloat(videoRate) || 0,
+      await apiService.patch('/api/users/me/pricing', {
+        pricingChat: Math.round((parseFloat(chatRate) || 0) * 100),
+        pricingVoice: Math.round((parseFloat(voiceRate) || 0) * 100),
+        pricingVideo: Math.round((parseFloat(videoRate) || 0) * 100),
       });
       addToast('success', 'Rates updated successfully');
       if (refreshUser) refreshUser();
@@ -153,14 +157,14 @@ export function ReaderDashboard() {
 
   if (!user) return <LoadingPage message="Loading dashboard..." />;
 
-  // Earnings calculations
+  // Earnings calculations (all in cents)
   const completedSessions = sessions.filter((s) => s.status === 'completed');
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayEarnings = completedSessions
     .filter((s) => s.createdAt.startsWith(todayStr))
-    .reduce((sum, s) => sum + s.readerEarnings, 0);
-  const totalEarnings = completedSessions.reduce((sum, s) => sum + s.readerEarnings, 0);
-  const pendingBalance = user.accountBalance;
+    .reduce((sum, s) => sum + s.readerEarned, 0);
+  const totalEarnings = completedSessions.reduce((sum, s) => sum + s.readerEarned, 0);
+  const pendingBalance = user.balance;
   const avgRating = reviews.length > 0
     ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
     : 0;
@@ -170,7 +174,7 @@ export function ReaderDashboard() {
       <div className="container">
         <section className="section section--hero">
           <h1 className="heading-2">Reader Dashboard</h1>
-          <p className="hero__tagline">{user.fullName || user.displayName || 'Reader'}</p>
+          <p className="hero__tagline">{user.fullName || user.username || 'Reader'}</p>
           <div className="divider" />
         </section>
 
@@ -209,9 +213,9 @@ export function ReaderDashboard() {
 
         {/* ── Stats ──────────────────────────────────── */}
         <div className="grid grid--stats">
-          <Stat label="Today's Earnings" value={`$${todayEarnings.toFixed(2)}`} icon="💰" />
-          <Stat label="Pending Balance" value={`$${pendingBalance.toFixed(2)}`} icon="⏳" />
-          <Stat label="Total Earned" value={`$${totalEarnings.toFixed(2)}`} icon="📊" />
+          <Stat label="Today's Earnings" value={centsToDisplay(todayEarnings)} icon="💰" />
+          <Stat label="Pending Balance" value={centsToDisplay(pendingBalance)} icon="⏳" />
+          <Stat label="Total Earned" value={centsToDisplay(totalEarnings)} icon="📊" />
           <Stat label="Avg Rating" value={avgRating > 0 ? avgRating.toFixed(1) : '—'} icon="⭐" />
         </div>
 
@@ -303,7 +307,7 @@ export function ReaderDashboard() {
                       <span className="review__author">
                         {review.clientName || `Client #${review.clientId}`}
                       </span>
-                      <span className="review__date">{formatDate(review.createdAt)}</span>
+                      <span className="review__date">{formatDate(review.completedAt)}</span>
                     </div>
                     <StarRating value={review.rating} size="sm" />
                   </div>

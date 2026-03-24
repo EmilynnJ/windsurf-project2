@@ -19,19 +19,19 @@ const POSTS_PER_PAGE = 10;
 
 const CATEGORIES: { value: ForumCategory | ''; label: string }[] = [
   { value: '', label: 'All Categories' },
-  { value: 'general', label: 'General' },
-  { value: 'readings', label: 'Readings' },
-  { value: 'spiritual_growth', label: 'Spiritual Growth' },
-  { value: 'introductions', label: 'Introductions' },
-  { value: 'off_topic', label: 'Off Topic' },
+  { value: 'General', label: 'General' },
+  { value: 'Readings', label: 'Readings' },
+  { value: 'Spiritual Growth', label: 'Spiritual Growth' },
+  { value: 'Ask a Reader', label: 'Ask a Reader' },
+  { value: 'Announcements', label: 'Announcements' },
 ];
 
 const CATEGORY_LABELS: Record<string, string> = {
-  general: 'General',
-  readings: 'Readings',
-  spiritual_growth: 'Spiritual Growth',
-  introductions: 'Introductions',
-  off_topic: 'Off Topic',
+  'General': 'General',
+  'Readings': 'Readings',
+  'Spiritual Growth': 'Spiritual Growth',
+  'Ask a Reader': 'Ask a Reader',
+  'Announcements': 'Announcements',
 };
 
 const CREATE_CATEGORY_OPTIONS = CATEGORIES.filter((c) => c.value !== '');
@@ -110,7 +110,7 @@ function PostCard({
 
   const handleFlagComment = async (commentId: number) => {
     try {
-      await apiService.post(`/api/forum/comments/${commentId}/flag`);
+      await apiService.post('/api/forum/flag', { commentId, reason: 'Flagged by user' });
       addToast('info', 'Comment flagged for review');
     } catch {
       addToast('error', 'Failed to flag comment');
@@ -132,12 +132,12 @@ function PostCard({
       {/* ── Post Header ── */}
       <div className="forum-post__header">
         <Avatar
-          src={post.userAvatar}
-          name={post.userName}
+          src={post.authorImage}
+          name={post.authorName}
           size="sm"
         />
         <div className="forum-post__meta">
-          <span className="forum-post__author">{post.userName || 'Anonymous'}</span>
+          <span className="forum-post__author">{post.authorName || post.authorUsername || 'Anonymous'}</span>
           <span className="forum-post__time">
             {timeAgo(post.createdAt)} · {CATEGORY_LABELS[post.category] || post.category}
           </span>
@@ -167,7 +167,7 @@ function PostCard({
             🚩 Flag
           </button>
         )}
-        {(userRole === 'admin' || userId === post.userId) && (
+        {(userRole === 'admin' || userId === post.authorId) && (
           <button
             className="btn btn--ghost btn--sm"
             onClick={() => onDelete(post.id)}
@@ -188,10 +188,10 @@ function PostCard({
           ) : (
             comments.map((comment) => (
               <div key={comment.id} className="forum-comment">
-                <Avatar src={comment.userAvatar} name={comment.userName} size="sm" />
+                <Avatar src={comment.authorImage} name={comment.authorName} size="sm" />
                 <div className="forum-comment__body">
                   <div className="forum-comment__meta">
-                    <span className="forum-comment__author">{comment.userName || 'Anonymous'}</span>
+                    <span className="forum-comment__author">{comment.authorName || comment.authorUsername || 'Anonymous'}</span>
                     <span className="forum-comment__time">{timeAgo(comment.createdAt)}</span>
                     {isLoggedIn && (
                       <button
@@ -202,7 +202,7 @@ function PostCard({
                         🚩
                       </button>
                     )}
-                    {(userRole === 'admin' || userId === comment.userId) && (
+                    {(userRole === 'admin' || userId === comment.authorId) && (
                       <button
                         className="btn btn--ghost btn--sm"
                         onClick={() => handleDeleteComment(comment.id)}
@@ -266,7 +266,7 @@ export function CommunityHubPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newContent, setNewContent] = useState('');
-  const [newCategory, setNewCategory] = useState<string>('general');
+  const [newCategory, setNewCategory] = useState<string>('General');
   const [creating, setCreating] = useState(false);
 
   /* ── Fetch posts ── */
@@ -280,11 +280,11 @@ export function CommunityHubPage() {
       });
       if (category) query.set('category', category);
 
-      const data = await apiService.get<{ posts: ForumPost[]; total: number }>(
+      const data = await apiService.get<{ posts: ForumPost[]; pagination: { total: number } }>(
         `/api/forum/posts?${query.toString()}`
       );
       setPosts(data.posts || []);
-      setTotalCount(data.total || 0);
+      setTotalCount(data.pagination?.total || 0);
     } catch {
       addToast('error', 'Failed to load posts');
     } finally {
@@ -326,7 +326,7 @@ export function CommunityHubPage() {
   /* ── Flag / Delete handlers ── */
   const handleFlag = async (postId: number) => {
     try {
-      await apiService.post(`/api/forum/posts/${postId}/flag`);
+      await apiService.post('/api/forum/flag', { postId, reason: 'Flagged by user' });
       addToast('info', 'Post flagged for review');
     } catch {
       addToast('error', 'Failed to flag post');

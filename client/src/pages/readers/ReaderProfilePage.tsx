@@ -41,13 +41,11 @@ export function ReaderProfilePage() {
 
     async function load() {
       try {
-        const [readerData, reviewData] = await Promise.all([
-          apiService.get<ReaderPublic>(`/api/readers/${id}`),
-          apiService.get<(Review & { clientName?: string })[]>(`/api/readers/${id}/reviews`).catch(() => []),
-        ]);
+        const readerData = await apiService.get<ReaderPublic & { reviews?: (Review & { clientName?: string })[] }>(`/api/readers/${id}`);
         if (!cancelled) {
-          setReader(readerData);
-          setReviews(reviewData);
+          const { reviews: reviewData, ...readerOnly } = readerData;
+          setReader(readerOnly as ReaderPublic);
+          setReviews(reviewData || []);
           setError(null);
         }
       } catch (err) {
@@ -74,7 +72,7 @@ export function ReaderProfilePage() {
       if (!user) return;
 
       // Minimum $5 balance check
-      if (user.accountBalance < 5) {
+      if (user.balance < 500) {
         addToast('warning', 'You need at least $5.00 in your account to start a reading.');
         navigate('/dashboard');
         return;
@@ -84,7 +82,7 @@ export function ReaderProfilePage() {
       try {
         const reading = await apiService.post<{ id: number }>('/api/readings', {
           readerId: reader?.id,
-          type,
+          readingType: type,
         });
         navigate(`/reading/${reading.id}`);
       } catch (err) {
@@ -134,7 +132,7 @@ export function ReaderProfilePage() {
           <div className="card card--glow-gold card--pad-lg">
             <div className="profile-hero">
               <img
-                src={reader.profileImage || reader.avatar || ''}
+                src={reader.profileImage || ''}
                 alt={`${name}'s profile photo`}
                 className="profile-hero__image"
                 onError={(e) => {
@@ -188,7 +186,7 @@ export function ReaderProfilePage() {
               <div className="card card--interactive" onClick={() => handleStartReading('chat')} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') handleStartReading('chat'); }}>
                 <div className="profile-rate">
                   <span className="profile-rate__type">💬 Chat</span>
-                  <span className="profile-rate__price">${reader.pricingChat.toFixed(2)}/min</span>
+                  <span className="profile-rate__price">${(reader.pricingChat / 100).toFixed(2)}/min</span>
                   <Button
                     variant="primary"
                     size="sm"
@@ -206,7 +204,7 @@ export function ReaderProfilePage() {
               <div className="card card--interactive" onClick={() => handleStartReading('voice')} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') handleStartReading('voice'); }}>
                 <div className="profile-rate">
                   <span className="profile-rate__type">🎙️ Voice</span>
-                  <span className="profile-rate__price">${reader.pricingVoice.toFixed(2)}/min</span>
+                  <span className="profile-rate__price">${(reader.pricingVoice / 100).toFixed(2)}/min</span>
                   <Button
                     variant="primary"
                     size="sm"
@@ -224,7 +222,7 @@ export function ReaderProfilePage() {
               <div className="card card--interactive" onClick={() => handleStartReading('video')} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') handleStartReading('video'); }}>
                 <div className="profile-rate">
                   <span className="profile-rate__type">📹 Video</span>
-                  <span className="profile-rate__price">${reader.pricingVideo.toFixed(2)}/min</span>
+                  <span className="profile-rate__price">${(reader.pricingVideo / 100).toFixed(2)}/min</span>
                   <Button
                     variant="primary"
                     size="sm"

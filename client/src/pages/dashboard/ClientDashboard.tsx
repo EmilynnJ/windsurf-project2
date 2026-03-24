@@ -18,7 +18,7 @@ import type { Column } from '../../components/ui';
 import type { Reading, Transaction } from '../../types';
 
 /* ── Constants ──────────────────────────────────────────────── */
-const PRESET_AMOUNTS = [10, 25, 50, 100];
+const PRESET_AMOUNTS = [10, 25, 50, 100]; // dollars
 const MIN_AMOUNT = 5;
 
 /* ── Helpers ────────────────────────────────────────────────── */
@@ -36,6 +36,10 @@ function formatDuration(seconds: number): string {
   return `${m}m ${s}s`;
 }
 
+function centsToDisplay(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`;
+}
+
 /* ── Reading & Transaction Column Definitions ───────────────── */
 const readingColumns: Column<Reading & Record<string, unknown>>[] = [
   {
@@ -45,32 +49,37 @@ const readingColumns: Column<Reading & Record<string, unknown>>[] = [
     render: (row) => formatDate(row.createdAt as string),
   },
   {
-    key: 'type',
+    key: 'readingType',
     header: 'Type',
     render: (row) => {
       const icons: Record<string, string> = { chat: '💬', voice: '🎙️', video: '📹' };
-      return `${icons[row.type as string] || ''} ${(row.type as string).charAt(0).toUpperCase() + (row.type as string).slice(1)}`;
+      const t = row.readingType as string;
+      return `${icons[t] || ''} ${t.charAt(0).toUpperCase() + t.slice(1)}`;
     },
   },
   {
     key: 'status',
     header: 'Status',
-    render: (row) => (
-      <span className={`badge badge--${row.status === 'completed' ? 'gold' : row.status === 'in_progress' ? 'online' : 'info'}`}>
-        {(row.status as string).replace('_', ' ')}
-      </span>
-    ),
+    render: (row) => {
+      const s = row.status as string;
+      const variant = s === 'completed' ? 'gold' : s === 'active' ? 'online' : 'info';
+      return (
+        <span className={`badge badge--${variant}`}>
+          {s.charAt(0).toUpperCase() + s.slice(1)}
+        </span>
+      );
+    },
   },
   {
-    key: 'duration',
+    key: 'durationSeconds',
     header: 'Duration',
-    render: (row) => formatDuration(row.duration as number),
+    render: (row) => formatDuration(row.durationSeconds as number),
   },
   {
-    key: 'totalCost',
+    key: 'totalCharged',
     header: 'Cost',
     sortable: true,
-    render: (row) => <span className="price">${(row.totalCost as number).toFixed(2)}</span>,
+    render: (row) => <span className="price">{centsToDisplay(row.totalCharged as number)}</span>,
   },
 ];
 
@@ -86,10 +95,11 @@ const transactionColumns: Column<Transaction & Record<string, unknown>>[] = [
     header: 'Type',
     render: (row) => {
       const labels: Record<string, string> = {
-        top_up: '💰 Top Up',
+        topup: '💰 Top Up',
         reading_charge: '🔮 Reading',
         refund: '↩️ Refund',
         admin_adjustment: '⚙️ Adjustment',
+        reader_payout: '💸 Payout',
       };
       return labels[row.type as string] || row.type;
     },
@@ -99,19 +109,19 @@ const transactionColumns: Column<Transaction & Record<string, unknown>>[] = [
     header: 'Amount',
     sortable: true,
     render: (row) => {
-      const amt = row.amount as number;
+      const amt = (row.amount as number) / 100;
       const isPositive = amt >= 0;
       return (
         <span className={isPositive ? 'price price--positive' : 'price price--negative'}>
-          {isPositive ? '+' : ''}${amt.toFixed(2)}
+          {isPositive ? '+' : ''}${Math.abs(amt).toFixed(2)}
         </span>
       );
     },
   },
   {
-    key: 'description',
+    key: 'note',
     header: 'Description',
-    render: (row) => (row.description as string) || '—',
+    render: (row) => (row.note as string) || '—',
   },
 ];
 
@@ -137,7 +147,7 @@ export function ClientDashboard() {
       try {
         const [readingData, txData] = await Promise.all([
           apiService.get<Reading[]>('/api/readings/my'),
-          apiService.get<Transaction[]>('/api/transactions/my'),
+          apiService.get<Transaction[]>('/api/payments/transactions'),
         ]);
         setReadings(readingData);
         setTransactions(txData);
@@ -152,22 +162,23 @@ export function ClientDashboard() {
 
   /* ── Add Funds ── */
   const handleAddFunds = useCallback(async () => {
-    const amount = selectedAmount || parseFloat(customAmount);
-    if (!amount || amount < MIN_AMOUNT) {
+    const amountDollars = selectedAmount || parseFloat(customAmount);
+    if (!amountDollars || amountDollars < MIN_AMOUNT) {
       addToast('error', `Minimum deposit is $${MIN_AMOUNT}.00`);
       return;
     }
 
     setAddingFunds(true);
     try {
-      await apiService.post('/api/transactions/top-up', { amount });
-      addToast('success', `$${amount.toFixed(2)} added to your balance! ✨`);
+      const amountCents = Math.round(amountDollars * 100);
+      await apiService.post('/api/payments/create-payment-intent', { amount: amountCents });
+      addToast('success', `$${amountDollars.toFixed(2)} added to your balance! ✨`);
       setShowAddFunds(false);
       setSelectedAmount(25);
       setCustomAmount('');
       if (refreshUser) refreshUser();
       // Refresh transactions
-      const txData = await apiService.get<Transaction[]>('/api/transactions/my');
+      const txData = await apiService.get<Transaction[]>('/api/payments/transactions');
       setTransactions(txData);
     } catch {
       addToast('error', 'Failed to add funds. Please try again.');
@@ -178,14 +189,14 @@ export function ClientDashboard() {
 
   if (!user) return <LoadingPage message="Loading dashboard..." />;
 
-  const activeReadings = readings.filter((r) => r.status === 'in_progress' || r.status === 'pending');
+  const activeReadings = readings.filter((r) => r.status === 'active' || r.status === 'pending');
   const completedReadings = readings.filter((r) => r.status === 'completed');
 
   return (
     <div className="page-enter">
       <div className="container">
         <section className="section section--hero">
-          <h1 className="heading-2">Welcome back, {user.displayName || user.fullName || 'Seeker'}</h1>
+          <h1 className="heading-2">Welcome back, {user.fullName || user.username || 'Seeker'}</h1>
           <div className="divider" />
         </section>
 
@@ -196,7 +207,7 @@ export function ClientDashboard() {
               <div className="balance-display">
                 <span className="balance-display__label">Account Balance</span>
                 <span className="balance-display__amount">
-                  ${user.accountBalance.toFixed(2)}
+                  {centsToDisplay(user.balance)}
                 </span>
                 <Button variant="gold" onClick={() => setShowAddFunds(true)}>
                   + Add Funds
@@ -222,7 +233,7 @@ export function ClientDashboard() {
                       <div>
                         <span className="badge badge--online">In Progress</span>
                         <p className="caption">
-                          {reading.type.charAt(0).toUpperCase() + reading.type.slice(1)} reading · ${reading.ratePerMinute.toFixed(2)}/min
+                          {reading.readingType.charAt(0).toUpperCase() + reading.readingType.slice(1)} reading · {centsToDisplay(reading.ratePerMinute)}/min
                         </p>
                       </div>
                       <Button

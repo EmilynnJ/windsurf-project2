@@ -1,5 +1,5 @@
 // ============================================================
-// Auth Routes — Auth0 callback, user sync, profile retrieval
+// Auth Routes — Auth0 callback/sync, user profile retrieval
 // ============================================================
 
 import { Router } from "express";
@@ -15,6 +15,7 @@ import { logger } from "../utils/logger";
 const router = Router();
 
 // ── POST /api/auth/callback — Sync Auth0 user to internal DB ────────────
+// Called by the frontend after Auth0 login to create/update the internal user record.
 const callbackSchema = z.object({
   auth0Id: z.string().min(1),
   email: z.string().email(),
@@ -46,9 +47,11 @@ router.post("/callback", checkJwt, validate(callbackSchema), async (req, res, ne
           .set(updates)
           .where(eq(users.id, existing.id))
           .returning();
-        res.json(updated);
+        const { auth0Id, stripeAccountId, ...safe } = updated!;
+        res.json(safe);
       } else {
-        res.json(existing);
+        const { auth0Id, stripeAccountId, ...safe } = existing;
+        res.json(safe);
       }
       return;
     }
@@ -67,13 +70,15 @@ router.post("/callback", checkJwt, validate(callbackSchema), async (req, res, ne
       .returning();
 
     logger.info({ userId: newUser!.id, email: body.email }, "New user created");
-    res.status(201).json(newUser);
+    const { auth0Id, stripeAccountId, ...safe } = newUser!;
+    res.status(201).json(safe);
   } catch (err) {
     next(err);
   }
 });
 
 // ── GET /api/auth/me — Get current user profile ─────────────────────────
+// Called after sync to fetch the current user's profile.
 router.get("/me", checkJwt, async (req, res, next) => {
   try {
     if (!req.user) {

@@ -255,6 +255,49 @@ router.post(
   },
 );
 
+// ── DELETE /api/forum/posts/:id — Delete a post (author or admin) ─────────
+router.delete("/posts/:id", checkJwt, async (req, res, next) => {
+  try {
+    const db = getDb();
+    const postId = parseInt(req.params.id!, 10);
+    const user = req.user!;
+
+    const [post] = await db.select().from(forumPosts).where(eq(forumPosts.id, postId));
+    if (!post) throw new AppError(404, "Post not found");
+    if (post.authorId !== user.id && user.role !== "admin") {
+      throw new AppError(403, "Not authorized to delete this post");
+    }
+
+    // Delete comments first, then post
+    await db.delete(forumComments).where(eq(forumComments.postId, postId));
+    await db.delete(forumPosts).where(eq(forumPosts.id, postId));
+
+    res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── DELETE /api/forum/comments/:id — Delete a comment (author or admin) ───
+router.delete("/comments/:id", checkJwt, async (req, res, next) => {
+  try {
+    const db = getDb();
+    const commentId = parseInt(req.params.id!, 10);
+    const user = req.user!;
+
+    const [comment] = await db.select().from(forumComments).where(eq(forumComments.id, commentId));
+    if (!comment) throw new AppError(404, "Comment not found");
+    if (comment.authorId !== user.id && user.role !== "admin") {
+      throw new AppError(403, "Not authorized to delete this comment");
+    }
+
+    await db.delete(forumComments).where(eq(forumComments.id, commentId));
+    res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ── POST /api/forum/flag — Flag a post or comment ───────────────────────
 const flagSchema = z.object({
   postId: z.number().int().positive().optional(),
