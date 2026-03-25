@@ -1,4 +1,4 @@
-/* ─── User & Auth ─────────────────────────────────────────────── */
+/* ────────────────────────────────────────────────────────────── User & Auth ───── */
 
 export type UserRole = 'client' | 'reader' | 'admin';
 
@@ -10,7 +10,8 @@ export interface User {
   profileImage?: string;
   role: UserRole;
   isOnline: boolean;
-  balance: number; // cents
+  balance: number; // cents (alias for accountBalance for compatibility)
+  accountBalance: number; // cents - same as balance
   bio?: string;
   specialties?: string;
   pricingChat: number;
@@ -30,7 +31,7 @@ export interface AuthState {
   refreshUser?: () => void;
 }
 
-/* ─── Reader (Public view) ────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────── Reader (Public view) ───── */
 
 export interface ReaderPublic {
   id: number;
@@ -38,6 +39,7 @@ export interface ReaderPublic {
   fullName?: string;
   bio?: string;
   profileImage?: string;
+  avatar?: string; // alias for profileImage for compatibility
   specialties?: string;
   isOnline: boolean;
   pricingChat: number;
@@ -48,20 +50,23 @@ export interface ReaderPublic {
   reviewCount?: number;
 }
 
-/* ─── Readings ────────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────── Readings ───── */
 
 export type ReadingType = 'chat' | 'voice' | 'video';
-export type ReadingStatus = 'pending' | 'active' | 'paused' | 'completed' | 'cancelled' | 'missed';
+export type ReadingStatus = 'pending' | 'active' | 'paused' | 'completed' | 'cancelled' | 'missed' | 'in_progress';
 
 export interface Reading {
   id: number;
   clientId: number;
   readerId: number;
   readingType: ReadingType;
+  type: ReadingType; // alias for readingType for compatibility
   status: ReadingStatus;
   ratePerMinute: number;
   durationSeconds: number;
+  duration: number; // alias for durationSeconds for compatibility
   totalCharged: number;
+  totalCost: number; // alias for totalCharged for compatibility
   readerEarned: number;
   platformEarned: number;
   agoraChannel?: string;
@@ -81,7 +86,7 @@ export interface Reading {
   clientUsername?: string;
 }
 
-/* ─── Transactions ────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────── Transactions ───── */
 
 export type TransactionType = 'topup' | 'reading_charge' | 'reader_payout' | 'refund' | 'admin_adjustment';
 
@@ -97,14 +102,16 @@ export interface Transaction {
   createdAt: string;
 }
 
-/* ─── Forum ───────────────────────────────────────────────────── */
+/* ───────────────────────────────────────────────────────────────── Forum ───── */
 
 export type ForumCategory = 'General' | 'Readings' | 'Spiritual Growth' | 'Ask a Reader' | 'Announcements';
 
 export interface ForumPost {
   id: number;
   authorId: number;
+  userId: number; // alias for authorId for compatibility
   authorName?: string;
+  userName?: string; // alias for authorName for compatibility
   authorUsername?: string;
   authorImage?: string;
   category: ForumCategory;
@@ -128,7 +135,7 @@ export interface ForumComment {
   createdAt: string;
 }
 
-/* ─── Reviews ─────────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────── Reviews ───── */
 
 export interface Review {
   id: number;
@@ -138,11 +145,12 @@ export interface Review {
   rating: number;
   review?: string;
   completedAt: string;
+  createdAt: string; // added for compatibility
   clientName?: string;
   clientUsername?: string;
 }
 
-/* ─── API ─────────────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────────── API ───── */
 
 export interface ApiError {
   message: string;
