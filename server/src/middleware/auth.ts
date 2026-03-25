@@ -12,18 +12,11 @@ export const checkJwt = auth({
 
 /**
  * Combined middleware: validate JWT + resolve internal user record.
- * Use as `router.use(requireAuth)` or `router.get('/path', requireAuth, handler)`.
- *
  * After this middleware runs, `req.user` is populated with the full DB user object.
  */
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
-  // First: check JWT
   (checkJwt as RequestHandler)(req, res, (err?: any) => {
-    if (err) {
-      next(err);
-      return;
-    }
-    // Then: resolve DB user from JWT sub claim
+    if (err) { next(err); return; }
     resolveUser(req, res, next);
   });
 }
