@@ -1,123 +1,186 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../../components/ToastProvider';
 import { apiService } from '../../services/api';
-import AgoraRTC, {
-  type IAgoraRTCClient,
-  type ICameraVideoTrack,
-  type IMicrophoneAudioTrack,
-} from 'agora-rtc-sdk-ng';
 import {
-  Button, Avatar, Badge, ConfirmDialog,
-  LoadingPage, EmptyState,
+  Button,
+  StarRating,
+  Textarea,
+  ConfirmDialog,
+  LoadingPage,
+  EmptyState,
 } from '../../components/ui';
+import type { Reading } from '../../types';
+import type { IMicrophoneAudioTrack, ICameraVideoTrack } from 'agora-rtc-sdk-ng';
 
-/* ─── Types ───────────────────────────────────────────────────── */
-
-interface ReadingSession {
-  id: number;
-  readerId: number;
-  clientId: number;
-  readingType: 'chat' | 'voice' | 'video';
-  status: string;
-  ratePerMinute: number;
-  readerName?: string;
-  clientName?: string;
-  agoraToken?: string;
-  agoraChannel?: string;
-}
-
+/* ================================================================
+   TYPES
+   ================================================================ */
 interface ChatMessage {
-  id?: number;
+  id: string;
   senderId: number;
   content: string;
-  createdAt: string;
+  timestamp: number;
 }
 
-function centsToPrice(c: number): string {
-  return `$${(c / 100).toFixed(2)}`;
+type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'reconnecting';
+
+interface SessionSummary {
+  duration: number;
+  totalCost: number;
+  ratePerMinute: number;
 }
 
-/* ─── Timer Hook ──────────────────────────────────────────────── */
-
-function useTimer(active: boolean) {
-  const [seconds, setSeconds] = useState(0);
-  const intervalRef = useRef<ReturnType<typeof setInterval>>();
-
-  useEffect(() => {
-    if (active) {
-      intervalRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
-    } else {
-      clearInterval(intervalRef.current);
-    }
-    return () => clearInterval(intervalRef.current);
-  }, [active]);
-
-  const minutes = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  const display = `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-
-  return { seconds, minutes, display };
+/* ================================================================
+   HELPERS
+   ================================================================ */
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const s = (seconds % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
 }
 
-/* ─── Chat Panel ──────────────────────────────────────────────── */
+function formatCost(amount: number): string {
+  return `$${amount.toFixed(2)}`;
+}
 
-function ChatPanel({
-  messages,
-  onSend,
-  userId,
-}: {
-  messages: ChatMessage[];
-  onSend: (content: string) => void;
-  userId: number;
-}) {
-  const [msg, setMsg] = useState('');
-  const bottomRef = useRef<HTMLDivElement>(null);
+/* ================================================================
+   AUDIO VISUALIZATION SUB-COMPONENT
+   ================================================================ */
+function AudioVisualization() {
+  return (
+    <div className="audio-vis" aria-hidden="true">
+      {[1, 2, 3, 4, 5].map((i) => (
+        <div key={i} className="audio-vis__bar" />
+      ))}
+    </div>
+  );
+}
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length]);
-
-  const handleSend = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!msg.trim()) return;
-    onSend(msg.trim());
-    setMsg('');
+/* ================================================================
+   CONNECTION STATUS SUB-COMPONENT
+   ================================================================ */
+function ConnectionStatus({ state }: { state: ConnectionState }) {
+  const labels: Record<ConnectionState, string> = {
+    connecting: 'Connecting...',
+    connected: 'Connected',
+    disconnected: 'Disconnected',
+    reconnecting: 'Reconnecting...',
   };
 
   return (
-    <div className="chat-panel">
-      <div className="chat-panel__messages">
+    <div className={`connection-status connection-status--${state}`} role="status" aria-live="polite">
+      <span className="connection-status__dot" />
+      <span>{labels[state]}</span>
+    </div>
+  );
+}
+
+/* ================================================================
+   SESSION BAR (Timer, Cost, Balance)
+   ================================================================ */
+function SessionBar({
+  elapsed,
+  cost,
+  balance,
+  rate,
+}: {
+  elapsed: number;
+  cost: number;
+  balance: number;
+  rate: number;
+}) {
+  const remaining = balance - cost;
+  const minutesLeft = rate > 0 ? remaining / rate : Infinity;
+  const isLow = minutesLeft < 2 && minutesLeft > 0;
+
+  return (
+    <div className="session-bar" role="timer" aria-label="Session information">
+      <div className="session-bar__item">
+        <span className="session-bar__label">Elapsed</span>
+        <span className="session-bar__value session-bar__value--time">{formatTime(elapsed)}</span>
+      </div>
+      <div className="session-bar__item">
+        <span className="session-bar__label">Cost</span>
+        <span className="session-bar__value session-bar__value--cost">{formatCost(cost)}</span>
+      </div>
+      <div className="session-bar__item">
+        <span className="session-bar__label">Balance</span>
+        <span className={`session-bar__value ${isLow ? 'session-bar__value--warning' : 'session-bar__value--balance'}`}>
+          {formatCost(remaining)}
+        </span>
+      </div>
+      {isLow && (
+        <div className="badge badge--danger" role="alert">
+          ⚠ Low balance — less than 2 minutes remaining
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ================================================================
+   CHAT MODE
+   ================================================================ */
+function ChatMode({
+  messages,
+  userId,
+  onSend,
+}: {
+  messages: ChatMessage[];
+  userId: number;
+  onSend: (text: string) => void;
+}) {
+  const [input, setInput] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto scroll to bottom
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim()) return;
+    onSend(input.trim());
+    setInput('');
+  };
+
+  return (
+    <div className="chat">
+      <div className="chat__messages" role="log" aria-label="Chat messages" aria-live="polite">
         {messages.length === 0 && (
-          <p className="text-center" style={{ color: 'var(--text-muted)', padding: 'var(--space-8)' }}>
-            ✨ Your reading session has begun. Say hello!
+          <p className="caption text-center" style={{ margin: 'auto' }}>
+            Your reading has begun. Send a message to start the conversation...
           </p>
         )}
-        {messages.map((m, i) => {
-          const isMe = m.senderId === userId;
+        {messages.map((msg) => {
+          const isSent = msg.senderId === userId;
           return (
-            <div key={m.id || i} className={`chat-bubble ${isMe ? 'chat-bubble--me' : 'chat-bubble--them'}`}>
-              <p>{m.content}</p>
-              <span className="chat-bubble__time">
-                {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </span>
+            <div
+              key={msg.id}
+              className={`chat__bubble ${isSent ? 'chat__bubble--sent' : 'chat__bubble--received'}`}
+            >
+              <div>{msg.content}</div>
+              <div className="chat__bubble-time">
+                {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </div>
             </div>
           );
         })}
-        <div ref={bottomRef} />
+        <div ref={messagesEndRef} />
       </div>
-
-      <form onSubmit={handleSend} className="chat-panel__input">
+      <form className="chat__input-bar" onSubmit={handleSubmit}>
         <input
-          type="text"
           className="form-input"
-          value={msg}
-          onChange={(e) => setMsg(e.target.value)}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
           placeholder="Type your message..."
-          autoFocus
+          aria-label="Chat message input"
+          autoComplete="off"
         />
-        <Button type="submit" variant="primary" disabled={!msg.trim()}>
+        <Button type="submit" variant="primary" size="sm" disabled={!input.trim()}>
           Send
         </Button>
       </form>
@@ -125,191 +188,503 @@ function ChatPanel({
   );
 }
 
-/* ─── Main Component ──────────────────────────────────────────── */
-
-export function ReadingSessionPage() {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  const { user } = useAuth();
-  const { addToast } = useToast();
-
-  const [session, setSession] = useState<ReadingSession | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [ending, setEnding] = useState(false);
-  const [confirmEnd, setConfirmEnd] = useState(false);
-
-  // Agora
-  const clientRef = useRef<IAgoraRTCClient | null>(null);
-  const localVideoRef = useRef<HTMLDivElement>(null);
-  const remoteVideoRef = useRef<HTMLDivElement>(null);
-  const [localAudio, setLocalAudio] = useState<IMicrophoneAudioTrack | null>(null);
-  const [localVideo, setLocalVideo] = useState<ICameraVideoTrack | null>(null);
-  const [muted, setMuted] = useState(false);
-  const [videoOff, setVideoOff] = useState(false);
-  const [connected, setConnected] = useState(false);
-
-  const isActive = session?.status === 'active';
-  const timer = useTimer(isActive && connected);
-  const currentCost = useMemo(
-    () => (timer.minutes + (timer.seconds % 60 > 0 ? 1 : 0)) * (session?.ratePerMinute ?? 0),
-    [timer.minutes, timer.seconds, session?.ratePerMinute]
+/* ================================================================
+   VOICE MODE
+   ================================================================ */
+function VoiceMode({
+  isMuted,
+  onToggleMute,
+  onEnd,
+  connectionState,
+}: {
+  isMuted: boolean;
+  onToggleMute: () => void;
+  onEnd: () => void;
+  connectionState: ConnectionState;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-6">
+      <div className="call-video">
+        <div className="call-video__placeholder">
+          <span className="call-video__placeholder-icon">🎙️</span>
+          <span>Voice Reading in Progress</span>
+          {connectionState === 'connected' && <AudioVisualization />}
+        </div>
+      </div>
+      <div className="call-controls">
+        <button
+          className={`call-controls__btn ${isMuted ? '' : 'call-controls__btn--active'}`}
+          onClick={onToggleMute}
+          aria-label={isMuted ? 'Unmute microphone' : 'Mute microphone'}
+          aria-pressed={!isMuted}
+        >
+          {isMuted ? '🔇' : '🎤'}
+        </button>
+        <button
+          className="call-controls__btn call-controls__btn--end"
+          onClick={onEnd}
+          aria-label="End voice call"
+        >
+          📞
+        </button>
+      </div>
+    </div>
   );
+}
 
-  // Fetch session data
-  useEffect(() => {
-    if (!id) return;
-    apiService
-      .get(`/api/readings/${id}`)
-      .then((data) => {
-        setSession(data as ReadingSession);
-        // Load existing messages for chat sessions
-        return apiService.get(`/api/readings/${id}/messages`).catch(() => []);
-      })
-      .then((msgs) => setMessages(msgs as ChatMessage[]))
-      .catch(() => setSession(null))
-      .finally(() => setLoading(false));
-  }, [id]);
+/* ================================================================
+   VIDEO MODE
+   ================================================================ */
+function VideoMode({
+  localVideoRef,
+  remoteVideoRef,
+  isMuted,
+  isCameraOff,
+  onToggleMute,
+  onToggleCamera,
+  onEnd,
+}: {
+  localVideoRef: React.RefObject<HTMLDivElement>;
+  remoteVideoRef: React.RefObject<HTMLDivElement>;
+  isMuted: boolean;
+  isCameraOff: boolean;
+  onToggleMute: () => void;
+  onToggleCamera: () => void;
+  onEnd: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="call-area">
+        <div className="call-video" ref={remoteVideoRef}>
+          <div className="call-video__placeholder">
+            <span className="call-video__placeholder-icon">🔮</span>
+            <span>Waiting for reader...</span>
+          </div>
+          <span className="call-video__label">Reader</span>
+        </div>
+        <div className="call-video" ref={localVideoRef}>
+          {isCameraOff && (
+            <div className="call-video__placeholder">
+              <span className="call-video__placeholder-icon">📷</span>
+              <span>Camera off</span>
+            </div>
+          )}
+          <span className="call-video__label">You</span>
+        </div>
+      </div>
+      <div className="call-controls">
+        <button
+          className={`call-controls__btn ${isMuted ? '' : 'call-controls__btn--active'}`}
+          onClick={onToggleMute}
+          aria-label={isMuted ? 'Unmute microphone' : 'Mute microphone'}
+          aria-pressed={!isMuted}
+        >
+          {isMuted ? '🔇' : '🎤'}
+        </button>
+        <button
+          className={`call-controls__btn ${isCameraOff ? '' : 'call-controls__btn--active'}`}
+          onClick={onToggleCamera}
+          aria-label={isCameraOff ? 'Turn camera on' : 'Turn camera off'}
+          aria-pressed={!isCameraOff}
+        >
+          {isCameraOff ? '📷' : '📹'}
+        </button>
+        <button
+          className="call-controls__btn call-controls__btn--end"
+          onClick={onEnd}
+          aria-label="End video call"
+        >
+          📞
+        </button>
+      </div>
+    </div>
+  );
+}
 
-  // Initialize Agora for voice/video
-  useEffect(() => {
-    if (!session || session.readingType === 'chat' || !session.agoraToken || !session.agoraChannel) return;
-    if (!user) return;
+/* ================================================================
+   POST-SESSION SUMMARY
+   ================================================================ */
+function PostSessionSummary({
+  summary,
+  readingId,
+  onDone,
+}: {
+  summary: SessionSummary;
+  readingId: number;
+  onDone: () => void;
+}) {
+  const { addToast } = useToast();
+  const [rating, setRating] = useState(0);
+  const [reviewText, setReviewText] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
 
-    const agoraClient = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
-    clientRef.current = agoraClient;
-
-    const init = async () => {
-      try {
-        await agoraClient.join(
-          import.meta.env.VITE_AGORA_APP_ID || '4a2f5242853447a09e1435f41fedbaf0',
-          session.agoraChannel!,
-          session.agoraToken!,
-          user.id
-        );
-
-        // Create local tracks
-        if (session.readingType === 'video') {
-          const [audioTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
-          setLocalAudio(audioTrack);
-          setLocalVideo(videoTrack);
-          await agoraClient.publish([audioTrack, videoTrack]);
-          if (localVideoRef.current) {
-            videoTrack.play(localVideoRef.current);
-          }
-        } else {
-          const audioTrack = await AgoraRTC.createMicrophoneAudioTrack();
-          setLocalAudio(audioTrack);
-          await agoraClient.publish([audioTrack]);
-        }
-
-        setConnected(true);
-
-        // Handle remote user
-        agoraClient.on('user-published', async (remoteUser, mediaType) => {
-          await agoraClient.subscribe(remoteUser, mediaType);
-          if (mediaType === 'video' && remoteVideoRef.current) {
-            remoteUser.videoTrack?.play(remoteVideoRef.current);
-          }
-          if (mediaType === 'audio') {
-            remoteUser.audioTrack?.play();
-          }
-        });
-
-        agoraClient.on('user-left', () => {
-          addToast('info', 'The other participant has left the session.');
-        });
-      } catch (err) {
-        console.error('Agora join error:', err);
-        addToast('error', 'Failed to connect to the session');
-      }
-    };
-
-    init();
-
-    return () => {
-      localAudio?.close();
-      localVideo?.close();
-      agoraClient.leave();
-    };
-  }, [session?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Poll for new messages in chat mode
-  useEffect(() => {
-    if (!session || session.readingType !== 'chat' || !isActive) return;
-    const interval = setInterval(async () => {
-      try {
-        const msgs = await apiService.get(`/api/readings/${session.id}/messages`);
-        setMessages(msgs as ChatMessage[]);
-      } catch {
-        // silently handle
-      }
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [session?.id, session?.readingType, isActive]);
-
-  const handleSendMessage = async (content: string) => {
-    if (!session || !user) return;
-    // Optimistic update
-    const optimistic: ChatMessage = {
-      senderId: user.id,
-      content,
-      createdAt: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, optimistic]);
-
+  const handleSubmitReview = async () => {
+    if (rating === 0) {
+      addToast('warning', 'Please select a star rating');
+      return;
+    }
+    setSubmitting(true);
     try {
-      await apiService.post(`/api/readings/${session.id}/messages`, { content });
+      await apiService.post(`/api/readings/${readingId}/review`, {
+        rating,
+        review: reviewText.trim() || undefined,
+      });
+      addToast('success', 'Thank you for your review! ✨');
+      setSubmitted(true);
     } catch {
-      addToast('error', 'Failed to send message');
+      addToast('error', 'Failed to submit review');
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const handleEndSession = async () => {
-    if (!session) return;
+  return (
+    <div className="session-summary">
+      <h2 className="heading-2">Reading Complete</h2>
+      <p className="hero__tagline">Thank you for your session</p>
+      <div className="divider" />
+
+      <div className="session-summary__stats">
+        <div className="session-summary__stat">
+          <span className="session-summary__stat-label">Duration</span>
+          <span className="session-summary__stat-value">{formatTime(summary.duration)}</span>
+        </div>
+        <div className="session-summary__stat">
+          <span className="session-summary__stat-label">Total Cost</span>
+          <span className="session-summary__stat-value price">{formatCost(summary.totalCost)}</span>
+        </div>
+        <div className="session-summary__stat">
+          <span className="session-summary__stat-label">Rate</span>
+          <span className="session-summary__stat-value caption">{formatCost(summary.ratePerMinute)}/min</span>
+        </div>
+      </div>
+
+      {!submitted ? (
+        <div className="card card--elevated w-full">
+          <div className="flex flex-col gap-4 items-center">
+            <h3 className="heading-4">Rate Your Experience</h3>
+            <StarRating value={rating} onChange={setRating} size="lg" />
+            <div className="w-full">
+              <Textarea
+                placeholder="Share your experience (optional)..."
+                value={reviewText}
+                onChange={(e) => setReviewText(e.target.value)}
+                aria-label="Review text"
+              />
+            </div>
+            <div className="flex gap-3">
+              <Button variant="ghost" onClick={onDone}>Skip</Button>
+              <Button
+                variant="gold"
+                onClick={handleSubmitReview}
+                loading={submitting}
+              >
+                Submit Review
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4 items-center">
+          <p className="body-text">Your review has been submitted. ✨</p>
+          <Button variant="primary" onClick={onDone}>
+            Return to Dashboard
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ================================================================
+   MAIN — READING SESSION PAGE
+   ================================================================ */
+export function ReadingSessionPage() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { user, isAuthenticated } = useAuth();
+  const { addToast } = useToast();
+
+  // ── Session State ──
+  const [reading, setReading] = useState<Reading | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // ── Timer/Cost ──
+  const [elapsed, setElapsed] = useState(0);
+  const [cost, setCost] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval>>();
+
+  // ── Connection ──
+  const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
+
+  // ── Chat ──
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+
+  // ── Voice/Video controls ──
+  const [isMuted, setIsMuted] = useState(false);
+  const [isCameraOff, setIsCameraOff] = useState(false);
+  const localVideoRef = useRef<HTMLDivElement>(null);
+  const remoteVideoRef = useRef<HTMLDivElement>(null);
+  const localAudioTrackRef = useRef<IMicrophoneAudioTrack | null>(null);
+  const localVideoTrackRef = useRef<ICameraVideoTrack | null>(null);
+
+  // ── End Session ──
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
+  const [ending, setEnding] = useState(false);
+  const [summary, setSummary] = useState<SessionSummary | null>(null);
+
+  /* ── Load reading data ── */
+  useEffect(() => {
+    async function loadReading() {
+      try {
+        const data = await apiService.get<Reading>(`/api/readings/${id}`);
+        setReading(data);
+
+        // If already completed, show summary
+        if (data.status === 'completed') {
+          setSummary({
+            duration: data.duration,
+            totalCost: data.totalCost,
+            ratePerMinute: data.ratePerMinute,
+          });
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load reading session');
+      } finally {
+        setPageLoading(false);
+      }
+    }
+    loadReading();
+  }, [id]);
+
+  /* ── Initialize Agora connection ── */
+  useEffect(() => {
+    if (!reading || reading.status === 'completed' || !reading.agoraChannel) return;
+
+    let mounted = true;
+
+    async function initAgora() {
+      try {
+        setConnectionState('connecting');
+
+        // Get Agora token from API
+        const tokenData = await apiService.get<{ token: string; uid: number }>(
+          `/api/readings/${reading!.id}/agora-token`
+        );
+
+        if (!mounted) return;
+
+        const appId = import.meta.env.VITE_AGORA_APP_ID;
+
+        if (reading!.type === 'chat') {
+          // RTM for chat
+          const { default: AgoraRTM } = await import('agora-rtm-sdk');
+          const rtmClient = new AgoraRTM.RTM(appId, String(tokenData.uid));
+          
+          await rtmClient.login();
+          
+          const channelName = reading!.agoraChannel!;
+          
+          await rtmClient.subscribe(channelName);
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          rtmClient.addEventListener('message', (event: any) => {
+            if (!mounted) return;
+            const content = typeof event.message === 'string'
+              ? event.message
+              : new TextDecoder().decode(event.message);
+            const msg: ChatMessage = {
+              id: `${Date.now()}-${Math.random()}`,
+              senderId: parseInt(event.publisher),
+              content,
+              timestamp: Date.now(),
+            };
+            setMessages((prev) => [...prev, msg]);
+          });
+
+          if (mounted) setConnectionState('connected');
+
+          // Cleanup
+          return () => {
+            mounted = false;
+            rtmClient.unsubscribe(channelName).catch(() => {});
+            rtmClient.logout().catch(() => {});
+          };
+        } else {
+          // RTC for voice/video
+          const AgoraRTC = (await import('agora-rtc-sdk-ng')).default;
+          const rtcClient = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
+
+          await rtcClient.join(appId, reading!.agoraChannel!, tokenData.token, tokenData.uid);
+
+          if (reading!.type === 'video') {
+            const [audioTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
+            localAudioTrackRef.current = audioTrack;
+            localVideoTrackRef.current = videoTrack;
+            await rtcClient.publish([audioTrack, videoTrack]);
+            if (localVideoRef.current) {
+              videoTrack.play(localVideoRef.current);
+            }
+          } else {
+            const audioTrack = await AgoraRTC.createMicrophoneAudioTrack();
+            localAudioTrackRef.current = audioTrack;
+            await rtcClient.publish([audioTrack]);
+          }
+
+          rtcClient.on('user-published', async (remoteUser, mediaType) => {
+            await rtcClient.subscribe(remoteUser, mediaType);
+            if (mediaType === 'video' && remoteVideoRef.current) {
+              remoteUser.videoTrack?.play(remoteVideoRef.current);
+            }
+            if (mediaType === 'audio') {
+              remoteUser.audioTrack?.play();
+            }
+          });
+
+          rtcClient.on('connection-state-change', (curState) => {
+            if (!mounted) return;
+            if (curState === 'CONNECTED') setConnectionState('connected');
+            else if (curState === 'RECONNECTING') setConnectionState('reconnecting');
+            else if (curState === 'DISCONNECTED') setConnectionState('disconnected');
+          });
+
+          if (mounted) setConnectionState('connected');
+
+          return () => {
+            mounted = false;
+            localAudioTrackRef.current = null;
+            localVideoTrackRef.current = null;
+            rtcClient.localTracks.forEach((t) => { t.stop(); t.close(); });
+            rtcClient.leave().catch(() => {});
+          };
+        }
+      } catch (err) {
+        if (mounted) {
+          setConnectionState('disconnected');
+          addToast('error', 'Failed to connect. Please check your connection.');
+          console.error('Agora init error:', err);
+        }
+      }
+    }
+
+    const cleanupPromise = initAgora();
+
+    return () => {
+      mounted = false;
+      cleanupPromise.then((cleanup) => cleanup?.()).catch(() => {});
+    };
+  }, [reading, addToast]);
+
+  /* ── Timer tick ── */
+  useEffect(() => {
+    if (!reading || reading.status === 'completed' || summary) return;
+
+    timerRef.current = setInterval(() => {
+      setElapsed((prev) => {
+        const next = prev + 1;
+        setCost(next / 60 * reading.ratePerMinute);
+        return next;
+      });
+    }, 1000);
+
+    return () => clearInterval(timerRef.current);
+  }, [reading, summary]);
+
+  /* ── Send chat message ── */
+  const handleSendMessage = useCallback(
+    async (text: string) => {
+      if (!reading || !user) return;
+
+      // Add to local messages immediately
+      const msg: ChatMessage = {
+        id: `${Date.now()}-local`,
+        senderId: user.id,
+        content: text,
+        timestamp: Date.now(),
+      };
+      setMessages((prev) => [...prev, msg]);
+
+      // Send via API (which sends through Agora RTM)
+      try {
+        await apiService.post(`/api/readings/${reading.id}/message`, {
+          content: text,
+        });
+      } catch {
+        addToast('error', 'Failed to send message');
+      }
+    },
+    [reading, user, addToast]
+  );
+
+  const handleToggleMute = useCallback(() => {
+    setIsMuted((prev) => {
+      const next = !prev;
+      localAudioTrackRef.current?.setMuted(next);
+      return next;
+    });
+  }, []);
+
+  const handleToggleCamera = useCallback(() => {
+    setIsCameraOff((prev) => {
+      const next = !prev;
+      localVideoTrackRef.current?.setEnabled(!next);
+      return next;
+    });
+  }, []);
+
+  /* ── End session ── */
+  const handleEndSession = useCallback(async () => {
+    if (!reading) return;
     setEnding(true);
     try {
-      await apiService.post(`/api/readings/${session.id}/end`, {});
-      addToast('success', 'Reading session ended');
-      // Cleanup Agora
-      localAudio?.close();
-      localVideo?.close();
-      clientRef.current?.leave();
-      navigate('/dashboard');
+      const result = await apiService.post<{
+        duration: number;
+        totalCost: number;
+        ratePerMinute: number;
+      }>(`/api/readings/${reading.id}/end`);
+
+      clearInterval(timerRef.current);
+      setSummary({
+        duration: result.duration,
+        totalCost: result.totalCost,
+        ratePerMinute: result.ratePerMinute,
+      });
+      setShowEndConfirm(false);
     } catch {
       addToast('error', 'Failed to end session');
     } finally {
       setEnding(false);
-      setConfirmEnd(false);
     }
-  };
+  }, [reading, addToast]);
 
-  const toggleMute = () => {
-    if (localAudio) {
-      localAudio.setMuted(!muted);
-      setMuted(!muted);
-    }
-  };
-
-  const toggleVideo = () => {
-    if (localVideo) {
-      localVideo.setEnabled(videoOff);
-      setVideoOff(!videoOff);
-    }
-  };
-
-  /* ─── Render ────────────────────────────────────────────── */
-
-  if (loading) return <LoadingPage message="Connecting to your reading..." />;
-
-  if (!session) {
+  /* ── Guards ── */
+  if (!isAuthenticated || !user) {
     return (
-      <div className="page-wrapper">
+      <div className="page-enter">
+        <div className="container">
+          <EmptyState
+            icon="🔒"
+            title="Sign In Required"
+            description="You must be signed in to join a reading session."
+            action={{ label: 'Sign In', onClick: () => navigate('/login') }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (pageLoading) return <LoadingPage message="Preparing your reading session..." />;
+
+  if (error || !reading) {
+    return (
+      <div className="page-enter">
         <div className="container">
           <EmptyState
             icon="🔮"
             title="Session Not Found"
-            description="This reading session doesn't exist or has ended."
+            description={error || 'This reading session could not be loaded.'}
             action={{ label: 'Go to Dashboard', onClick: () => navigate('/dashboard') }}
           />
         </div>
@@ -317,117 +692,118 @@ export function ReadingSessionPage() {
     );
   }
 
-  const isReader = user?.id === session.readerId;
-  const otherName = isReader ? session.clientName : session.readerName;
-
-  return (
-    <div className="page-wrapper page-enter" style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {/* ─── Session Header ───────────────────────────────── */}
-      <div className="session-header">
-        <div className="container flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Avatar name={otherName} size="sm" />
-            <div>
-              <strong>{otherName || 'Reading Session'}</strong>
-              <div className="flex items-center gap-2">
-                <Badge variant={isActive ? 'online' : 'gold'}>
-                  {session.readingType === 'chat' ? '💬' : session.readingType === 'voice' ? '🎤' : '📹'} {session.readingType}
-                </Badge>
-                <Badge variant="info">{session.status}</Badge>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-4">
-            {/* Timer */}
-            <div className="session-timer">
-              <span className="session-timer__time">{timer.display}</span>
-              <span className="session-timer__cost">{centsToPrice(currentCost)}</span>
-            </div>
-
-            {/* Rate */}
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              {centsToPrice(session.ratePerMinute)}/min
-            </span>
-
-            {/* End button */}
-            {isActive && (
-              <Button variant="danger" size="sm" onClick={() => setConfirmEnd(true)}>
-                End Session
-              </Button>
-            )}
-          </div>
+  /* ── Post-session summary ── */
+  if (summary) {
+    return (
+      <div className="page-enter">
+        <div className="container">
+          <section className="section">
+            <PostSessionSummary
+              summary={summary}
+              readingId={reading.id}
+              onDone={() => navigate('/dashboard')}
+            />
+          </section>
         </div>
       </div>
+    );
+  }
 
-      {/* ─── Session Body ─────────────────────────────────── */}
-      <div style={{ flex: 1, overflow: 'hidden' }}>
-        {session.readingType === 'chat' ? (
-          <div className="container" style={{ height: '100%' }}>
-            <ChatPanel
-              messages={messages}
-              onSend={handleSendMessage}
-              userId={user?.id ?? 0}
-            />
-          </div>
-        ) : (
-          <div className="session-av">
-            {/* Remote video (large) */}
-            <div className="session-av__remote" ref={remoteVideoRef}>
-              {!connected && (
-                <div className="loading-center">
-                  <div className="spinner" />
-                  <p>Connecting...</p>
-                </div>
-              )}
+  const readingTypeLabel = reading.type.charAt(0).toUpperCase() + reading.type.slice(1);
+
+  return (
+    <div className="page-enter">
+      <div className="container container--narrow">
+        {/* ── Header ── */}
+        <section className="section" style={{ paddingBottom: 0 }}>
+          <div className="flex justify-between items-center flex-wrap gap-3">
+            <div>
+              <h1 className="heading-3">
+                {readingTypeLabel} Reading
+              </h1>
+              <ConnectionStatus state={connectionState} />
             </div>
+            <Button
+              variant="danger"
+              onClick={() => setShowEndConfirm(true)}
+              aria-label="End reading session"
+            >
+              End Session
+            </Button>
+          </div>
+        </section>
 
-            {/* Local video (small PIP) */}
-            {session.readingType === 'video' && (
-              <div className="session-av__local" ref={localVideoRef} />
-            )}
+        {/* ── Session Bar ── */}
+        <section className="section" style={{ paddingTop: 'var(--space-4)' }}>
+          <SessionBar
+            elapsed={elapsed}
+            cost={cost}
+            balance={user.accountBalance}
+            rate={reading.ratePerMinute}
+          />
+        </section>
 
-            {/* Controls */}
-            <div className="session-av__controls">
-              <button
-                className={`session-av__btn ${muted ? 'session-av__btn--active' : ''}`}
-                onClick={toggleMute}
-                aria-label={muted ? 'Unmute' : 'Mute'}
+        {/* ── Reconnection UI ── */}
+        {connectionState === 'disconnected' && (
+          <div className="card card--glow-pink text-center">
+            <div className="flex flex-col gap-3 items-center">
+              <span className="empty-state__icon">⚠️</span>
+              <p className="body-text">
+                Connection lost. The session timer has paused.
+              </p>
+              <Button
+                variant="primary"
+                onClick={() => window.location.reload()}
               >
-                {muted ? '🔇' : '🎤'}
-              </button>
-              {session.readingType === 'video' && (
-                <button
-                  className={`session-av__btn ${videoOff ? 'session-av__btn--active' : ''}`}
-                  onClick={toggleVideo}
-                  aria-label={videoOff ? 'Turn on camera' : 'Turn off camera'}
-                >
-                  {videoOff ? '📷' : '📹'}
-                </button>
-              )}
-              <button
-                className="session-av__btn session-av__btn--end"
-                onClick={() => setConfirmEnd(true)}
-                aria-label="End session"
-              >
-                ✕
-              </button>
+                Reconnect
+              </Button>
             </div>
           </div>
         )}
-      </div>
 
-      {/* ─── Confirm End Dialog ───────────────────────────── */}
-      <ConfirmDialog
-        open={confirmEnd}
-        onClose={() => setConfirmEnd(false)}
-        onConfirm={handleEndSession}
-        title="End Reading Session"
-        message={`End this ${session.readingType} reading? Duration: ${timer.display}, Cost: ${centsToPrice(currentCost)}`}
-        confirmLabel="End Session"
-        variant="danger"
-        loading={ending}
-      />
+        {/* ── Reading Content ── */}
+        <section className="section">
+          {reading.type === 'chat' && (
+            <ChatMode
+              messages={messages}
+              userId={user.id}
+              onSend={handleSendMessage}
+            />
+          )}
+          {reading.type === 'voice' && (
+            <VoiceMode
+              isMuted={isMuted}
+              onToggleMute={handleToggleMute}
+              onEnd={() => setShowEndConfirm(true)}
+              connectionState={connectionState}
+            />
+          )}
+          {reading.type === 'video' && (
+            <VideoMode
+              localVideoRef={localVideoRef}
+              remoteVideoRef={remoteVideoRef}
+              isMuted={isMuted}
+              isCameraOff={isCameraOff}
+              onToggleMute={handleToggleMute}
+              onToggleCamera={handleToggleCamera}
+              onEnd={() => setShowEndConfirm(true)}
+            />
+          )}
+        </section>
+
+        {/* ── End Confirmation ── */}
+        <ConfirmDialog
+          open={showEndConfirm}
+          onClose={() => setShowEndConfirm(false)}
+          onConfirm={handleEndSession}
+          title="End Reading Session?"
+          message={`You've been in this ${readingTypeLabel.toLowerCase()} reading for ${formatTime(elapsed)}. Your total will be ${formatCost(cost)}. Are you sure you want to end the session?`}
+          confirmLabel="End Session"
+          cancelLabel="Continue Reading"
+          variant="danger"
+          loading={ending}
+        />
+      </div>
     </div>
   );
 }
