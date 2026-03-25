@@ -80,12 +80,13 @@ router.patch("/me/pricing", requireAuth, async (req, res, next) => {
     const db = getDb();
     if (req.user!.role !== "reader") { res.status(403).json({ error: "Only readers" }); return; }
     const updates: Record<string, any> = {};
-    if (typeof req.body.pricingChat === "number" && Number.isFinite(req.body.pricingChat))
-      updates.pricingChat = Math.trunc(Math.max(0, req.body.pricingChat));
-    if (typeof req.body.pricingVoice === "number" && Number.isFinite(req.body.pricingVoice))
-      updates.pricingVoice = Math.trunc(Math.max(0, req.body.pricingVoice));
-    if (typeof req.body.pricingVideo === "number" && Number.isFinite(req.body.pricingVideo))
-      updates.pricingVideo = Math.trunc(Math.max(0, req.body.pricingVideo));
+    const maxPricingCents = 100_000;
+    if (typeof req.body.pricingChat === "number" && Number.isSafeInteger(req.body.pricingChat) && req.body.pricingChat >= 0 && req.body.pricingChat <= maxPricingCents)
+      updates.pricingChat = req.body.pricingChat;
+    if (typeof req.body.pricingVoice === "number" && Number.isSafeInteger(req.body.pricingVoice) && req.body.pricingVoice >= 0 && req.body.pricingVoice <= maxPricingCents)
+      updates.pricingVoice = req.body.pricingVoice;
+    if (typeof req.body.pricingVideo === "number" && Number.isSafeInteger(req.body.pricingVideo) && req.body.pricingVideo >= 0 && req.body.pricingVideo <= maxPricingCents)
+      updates.pricingVideo = req.body.pricingVideo;
     if (!Object.keys(updates).length) { res.status(400).json({ error: "No pricing fields" }); return; }
     updates.updatedAt = new Date();
     const [u] = await db.update(users).set(updates).where(eq(users.id, req.user!.id)).returning();
