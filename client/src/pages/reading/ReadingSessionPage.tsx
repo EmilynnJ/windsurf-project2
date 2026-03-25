@@ -12,6 +12,7 @@ import {
   EmptyState,
 } from '../../components/ui';
 import type { Reading } from '../../types';
+import type { IMicrophoneAudioTrack, ICameraVideoTrack } from 'agora-rtc-sdk-ng';
 
 /* ================================================================
    TYPES
@@ -426,6 +427,8 @@ export function ReadingSessionPage() {
   const [isCameraOff, setIsCameraOff] = useState(false);
   const localVideoRef = useRef<HTMLDivElement>(null);
   const remoteVideoRef = useRef<HTMLDivElement>(null);
+  const localAudioTrackRef = useRef<IMicrophoneAudioTrack | null>(null);
+  const localVideoTrackRef = useRef<ICameraVideoTrack | null>(null);
 
   // ── End Session ──
   const [showEndConfirm, setShowEndConfirm] = useState(false);
@@ -518,12 +521,15 @@ export function ReadingSessionPage() {
 
           if (reading!.type === 'video') {
             const [audioTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
+            localAudioTrackRef.current = audioTrack;
+            localVideoTrackRef.current = videoTrack;
             await rtcClient.publish([audioTrack, videoTrack]);
             if (localVideoRef.current) {
               videoTrack.play(localVideoRef.current);
             }
           } else {
             const audioTrack = await AgoraRTC.createMicrophoneAudioTrack();
+            localAudioTrackRef.current = audioTrack;
             await rtcClient.publish([audioTrack]);
           }
 
@@ -548,6 +554,8 @@ export function ReadingSessionPage() {
 
           return () => {
             mounted = false;
+            localAudioTrackRef.current = null;
+            localVideoTrackRef.current = null;
             rtcClient.localTracks.forEach((t) => { t.stop(); t.close(); });
             rtcClient.leave().catch(() => {});
           };
@@ -609,6 +617,22 @@ export function ReadingSessionPage() {
     },
     [reading, user, addToast]
   );
+
+  const handleToggleMute = useCallback(() => {
+    setIsMuted((prev) => {
+      const next = !prev;
+      localAudioTrackRef.current?.setMuted(next);
+      return next;
+    });
+  }, []);
+
+  const handleToggleCamera = useCallback(() => {
+    setIsCameraOff((prev) => {
+      const next = !prev;
+      localVideoTrackRef.current?.setEnabled(!next);
+      return next;
+    });
+  }, []);
 
   /* ── End session ── */
   const handleEndSession = useCallback(async () => {
@@ -749,7 +773,7 @@ export function ReadingSessionPage() {
           {reading.type === 'voice' && (
             <VoiceMode
               isMuted={isMuted}
-              onToggleMute={() => setIsMuted((v) => !v)}
+              onToggleMute={handleToggleMute}
               onEnd={() => setShowEndConfirm(true)}
               connectionState={connectionState}
             />
@@ -760,8 +784,8 @@ export function ReadingSessionPage() {
               remoteVideoRef={remoteVideoRef}
               isMuted={isMuted}
               isCameraOff={isCameraOff}
-              onToggleMute={() => setIsMuted((v) => !v)}
-              onToggleCamera={() => setIsCameraOff((v) => !v)}
+              onToggleMute={handleToggleMute}
+              onToggleCamera={handleToggleCamera}
               onEnd={() => setShowEndConfirm(true)}
             />
           )}
