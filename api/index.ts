@@ -13,24 +13,23 @@ import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 
-// Server modules — use relative paths from api/ to server/src/
-// Vercel builds from project root, so these paths work at build time
-
+// Server modules — import from compiled server/dist/src/ directory
+// The build command compiles server before this function runs
 let app: express.Application | null = null;
 
 async function createApp() {
   if (app) return app;
 
-  // Dynamic imports to control load order
-  const { config } = await import('../server/src/config');
-  const { generalLimiter } = await import('../server/src/middleware/rate-limit');
-  const { globalErrorHandler } = await import('../server/src/middleware/error-handler');
-  const authRoutes = (await import('../server/src/routes/auth')).default;
-  const userRoutes = (await import('../server/src/routes/users')).default;
-  const readingRoutes = (await import('../server/src/routes/readings')).default;
-  const paymentRoutes = (await import('../server/src/routes/payments')).default;
-  const forumRoutes = (await import('../server/src/routes/forum')).default;
-  const adminRoutes = (await import('../server/src/routes/admin')).default;
+  // Dynamic imports from compiled server output
+  const { config } = await import('../server/dist/src/config.js');
+  const { generalLimiter } = await import('../server/dist/src/middleware/rate-limit.js');
+  const { globalErrorHandler } = await import('../server/dist/src/middleware/error-handler.js');
+  const authRoutes = (await import('../server/dist/src/routes/auth.js')).default;
+  const userRoutes = (await import('../server/dist/src/routes/users.js')).default;
+  const readingRoutes = (await import('../server/dist/src/routes/readings.js')).default;
+  const paymentRoutes = (await import('../server/dist/src/routes/payments.js')).default;
+  const forumRoutes = (await import('../server/dist/src/routes/forum.js')).default;
+  const adminRoutes = (await import('../server/dist/src/routes/admin.js')).default;
 
   app = express();
 
