@@ -51,17 +51,17 @@ function ReaderCard({ reader }: { reader: ReaderPublic }) {
       <div className="reader-card__rates">
         {reader.pricingChat > 0 && (
           <span className="reader-card__rate">
-            💬 <span className="reader-card__rate-value">${reader.pricingChat.toFixed(2)}</span>/min
+            💬 <span className="reader-card__rate-value">${(reader.pricingChat / 100).toFixed(2)}</span>/min
           </span>
         )}
         {reader.pricingVoice > 0 && (
           <span className="reader-card__rate">
-            🎙️ <span className="reader-card__rate-value">${reader.pricingVoice.toFixed(2)}</span>/min
+            🎙️ <span className="reader-card__rate-value">${(reader.pricingVoice / 100).toFixed(2)}</span>/min
           </span>
         )}
         {reader.pricingVideo > 0 && (
           <span className="reader-card__rate">
-            📹 <span className="reader-card__rate-value">${reader.pricingVideo.toFixed(2)}</span>/min
+            📹 <span className="reader-card__rate-value">${(reader.pricingVideo / 100).toFixed(2)}</span>/min
           </span>
         )}
       </div>

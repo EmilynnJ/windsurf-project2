@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getDb } from "../db/db";
 import { users, forumPosts, forumComments, forumFlags } from "../db/schema";
 import { requireAuth } from "../middleware/auth";
+import { requireRole } from "../middleware/rbac";
 import { validateBody } from "../middleware/validate";
 
 const router = Router();
@@ -83,6 +84,22 @@ router.post("/posts", requireAuth, validateBody(createPostSchema), async (req, r
   } catch (err) { next(err); }
 });
 
+// ─── GET /api/forum/posts/:id/comments — List comments for a post ───────────
+router.get("/posts/:id/comments", async (req, res, next) => {
+  try {
+    const db = getDb();
+    const postId = parseInt(req.params.id!, 10);
+    if (isNaN(postId)) { res.status(400).json({ error: "Invalid post ID" }); return; }
+
+    const comments = await db.select({
+      id: forumComments.id, authorId: forumComments.authorId, content: forumComments.content,
+      createdAt: forumComments.createdAt, authorName: users.fullName, authorUsername: users.username, authorImage: users.profileImage,
+    }).from(forumComments).innerJoin(users, eq(forumComments.authorId, users.id)).where(eq(forumComments.postId, postId)).orderBy(forumComments.createdAt);
+
+    res.json(comments);
+  } catch (err) { next(err); }
+});
+
 // ─── Create comment ─────────────────────────────────────────────────────────
 const createCommentSchema = z.object({ content: z.string().min(1).max(5000) });
 
@@ -159,6 +176,28 @@ router.post("/flags", requireAuth, validateBody(flagSchema), async (req, res, ne
       reporterId: req.user!.id, postId: req.body.postId ?? null, commentId: req.body.commentId ?? null, reason: req.body.reason,
     }).returning();
     res.status(201).json(flag);
+  } catch (err) { next(err); }
+});
+
+// ─── DELETE /api/forum/posts/:id — Admin deletes post (section 12.5) ────────
+router.delete("/posts/:id", requireAuth, requireRole("admin"), async (req, res, next) => {
+  try {
+    const db = getDb();
+    const postId = parseInt(req.params.id!, 10);
+    if (isNaN(postId)) { res.status(400).json({ error: "Invalid post ID" }); return; }
+    await db.delete(forumPosts).where(eq(forumPosts.id, postId));
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// ─── DELETE /api/forum/comments/:id — Admin deletes comment (section 12.5) ──
+router.delete("/comments/:id", requireAuth, requireRole("admin"), async (req, res, next) => {
+  try {
+    const db = getDb();
+    const commentId = parseInt(req.params.id!, 10);
+    if (isNaN(commentId)) { res.status(400).json({ error: "Invalid comment ID" }); return; }
+    await db.delete(forumComments).where(eq(forumComments.id, commentId));
+    res.json({ ok: true });
   } catch (err) { next(err); }
 });
 
