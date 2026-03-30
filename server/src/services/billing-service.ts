@@ -63,31 +63,25 @@ class BillingService {
     const rate = reading.ratePerMinute;
     if (rate <= 0) return;
 
-    const [client] = await db
-      .select({ balance: users.balance })
-      .from(users)
-      .where(eq(users.id, reading.clientId));
-
-    if (!client || client.balance < rate) {
-      // Insufficient balance -- end reading
-      await this.endReading(reading.id, "completed");
-      wsService.broadcast(
-        [reading.clientId, reading.readerId],
-        "reading:insufficient_balance",
-        { readingId: reading.id },
-      );
-      logger.info(
-        { readingId: reading.id, clientBalance: client?.balance, rate },
-        "Reading ended due to insufficient balance",
-      );
-      return;
-    }
-
-    // Charge 1 minute atomically
+    // Charge 1 minute atomically — balance check INSIDE the transaction
+    // to prevent race conditions per build guide section 8.4
     const readerShare = Math.floor(rate * 0.7);
     const platformShare = rate - readerShare;
 
+    let insufficientBalance = false;
+
     await db.transaction(async (tx) => {
+      // Check balance inside the transaction for atomicity
+      const [client] = await tx
+        .select({ balance: users.balance })
+        .from(users)
+        .where(eq(users.id, reading.clientId));
+
+      if (!client || client.balance < rate) {
+        insufficientBalance = true;
+        return; // rollback — no changes made
+      }
+
       await tx
         .update(readings)
         .set({
@@ -107,6 +101,21 @@ class BillingService {
         })
         .where(eq(users.id, reading.clientId));
     });
+
+    if (insufficientBalance) {
+      // End reading outside transaction since endReading has its own transaction
+      await this.endReading(reading.id, "completed");
+      wsService.broadcast(
+        [reading.clientId, reading.readerId],
+        "reading:insufficient_balance",
+        { readingId: reading.id },
+      );
+      logger.info(
+        { readingId: reading.id, rate },
+        "Reading ended due to insufficient balance",
+      );
+      return;
+    }
 
     logger.debug(
       { readingId: reading.id, rate, readerShare, platformShare },

@@ -1,26 +1,25 @@
+/**
+ * Stripe Webhook Route — POST /api/webhooks/stripe
+ * Per build guide section 12.4: POST /api/webhooks/stripe
+ * Also available at /api/payments/webhook for backward compat.
+ */
 import { Router } from "express";
-import { eq, desc, sql } from "drizzle-orm";
-import { z } from "zod";
+import { eq, sql } from "drizzle-orm";
 import Stripe from "stripe";
 import express from "express";
 import { getDb } from "../db/db";
 import { users, transactions } from "../db/schema";
-import { requireAuth } from "../middleware/auth";
-import { validateBody } from "../middleware/validate";
 import { config } from "../config";
 import { logger } from "../utils/logger";
-import { strictLimiter } from "../middleware/rate-limit";
 
 const router = Router();
 const stripe = new Stripe(config.stripe.secretKey, {
   apiVersion: "2024-06-20" as any,
 });
 
-const MIN_TOPUP = 500;
-
-// ─── POST /api/webhooks/stripe — Webhook (no auth, raw body) ────────────────
+// POST /api/webhooks/stripe
 router.post(
-  "/webhook",
+  "/stripe",
   express.raw({ type: "application/json" }),
   async (req, res, next) => {
     try {
@@ -47,7 +46,7 @@ router.post(
         const userId = parseInt(pi.metadata.userId ?? "0", 10);
 
         if (!userId) {
-          logger.warn({ piId: pi.id }, "No userId in metadata");
+          logger.warn({ piId: pi.id }, "No userId in payment intent metadata");
           res.json({ received: true });
           return;
         }
@@ -77,7 +76,6 @@ router.post(
 
           if (dup) return; // Already processed
 
-          // Get balance before update
           const [before] = await tx
             .select({ balance: users.balance })
             .from(users)
@@ -104,7 +102,10 @@ router.post(
           });
         });
 
-        logger.info({ userId, amount: pi.amount }, "Balance credited via webhook");
+        logger.info(
+          { userId, amount: pi.amount },
+          "Balance credited via webhook",
+        );
       }
 
       res.json({ received: true });
@@ -113,69 +114,5 @@ router.post(
     }
   },
 );
-
-// ─── GET /api/payments/balance — Current user balance ───────────────────────
-router.get("/balance", requireAuth, async (req, res, next) => {
-  try {
-    const db = getDb();
-    const [u] = await db
-      .select({ balance: users.balance })
-      .from(users)
-      .where(eq(users.id, req.user!.id));
-    res.json({ balance: u?.balance ?? 0 });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ─── POST /api/payments/create-intent — Create Stripe PaymentIntent ─────────
-const topupSchema = z.object({
-  amount: z
-    .number()
-    .int("Amount must be whole cents")
-    .min(MIN_TOPUP, "Minimum $5.00")
-    .max(1_000_000, "Maximum $10,000"),
-});
-
-router.post(
-  "/create-intent",
-  requireAuth,
-  strictLimiter,
-  validateBody(topupSchema),
-  async (req, res, next) => {
-    try {
-      const pi = await stripe.paymentIntents.create({
-        amount: req.body.amount,
-        currency: "usd",
-        metadata: { userId: String(req.user!.id), type: "balance_topup" },
-        automatic_payment_methods: { enabled: true },
-      });
-      res.json({ clientSecret: pi.client_secret, paymentIntentId: pi.id });
-    } catch (err) {
-      next(err);
-    }
-  },
-);
-
-// ─── GET /api/payments/transactions — User's transaction history ────────────
-router.get("/transactions", requireAuth, async (req, res, next) => {
-  try {
-    const db = getDb();
-    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
-    const offset = parseInt(req.query.offset as string) || 0;
-
-    const list = await db
-      .select()
-      .from(transactions)
-      .where(eq(transactions.userId, req.user!.id))
-      .orderBy(desc(transactions.createdAt))
-      .limit(limit)
-      .offset(offset);
-
-    res.json(list);
-  } catch (err) {
-    next(err);
-  }
-});
 
 export default router;

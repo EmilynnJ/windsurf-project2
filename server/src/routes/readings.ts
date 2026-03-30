@@ -311,63 +311,59 @@ router.post(
         return;
       }
 
+      // CRITICAL: Re-fetch the reading inside the transaction to get the latest
+      // billing-service-accumulated totals. Do NOT recalculate from elapsed time
+      // -- the billing service has already been deducting per-minute charges.
+      // We only finalize the record and credit the reader here.
+
       const now = new Date();
-      const durationSeconds = reading.startedAt
-        ? Math.floor((now.getTime() - reading.startedAt.getTime()) / 1000)
-        : 0;
-      const billedMinutes = Math.ceil(durationSeconds / 60);
-      const totalCharged = billedMinutes * reading.ratePerMinute;
-      const readerEarned = Math.floor(totalCharged * 0.7);
-      const platformEarned = totalCharged - readerEarned;
+
+      let finalReading: any;
 
       await db.transaction(async (tx) => {
-        // Finalize the reading
+        // Re-read the reading with latest accumulated billing totals
+        const [fresh] = await tx
+          .select()
+          .from(readings)
+          .where(eq(readings.id, reading.id));
+
+        if (!fresh) throw new Error("Reading not found");
+
+        // Prevent double-finalization
+        if (fresh.status === "completed") {
+          finalReading = fresh;
+          return;
+        }
+
+        const durationSeconds = fresh.startedAt
+          ? Math.floor((now.getTime() - fresh.startedAt.getTime()) / 1000)
+          : fresh.durationSeconds;
+
+        // Use the already-accumulated totals from the billing service ticks.
+        // These were charged incrementally each minute -- do NOT re-charge.
+        const totalCharged = fresh.totalCharged;
+        const readerEarned = fresh.readerEarned;
+        const platformEarned = fresh.platformEarned;
+
+        // Finalize the reading record
         await tx
           .update(readings)
           .set({
             status: "completed",
             completedAt: now,
             durationSeconds,
-            totalCharged,
-            readerEarned,
-            platformEarned,
-            paymentStatus: "paid",
+            paymentStatus: totalCharged > 0 ? "paid" : "pending",
             updatedAt: now,
           })
           .where(eq(readings.id, reading.id));
 
-        if (totalCharged > 0) {
-          // Charge client
-          const [clientBefore] = await tx
-            .select({ balance: users.balance })
-            .from(users)
-            .where(eq(users.id, reading.clientId));
-          const clientBalanceBefore = clientBefore?.balance ?? 0;
-
-          const [clientAfter] = await tx
-            .update(users)
-            .set({
-              balance: sql`${users.balance} - ${totalCharged}`,
-              updatedAt: now,
-            })
-            .where(eq(users.id, reading.clientId))
-            .returning({ balance: users.balance });
-
-          await tx.insert(transactions).values({
-            userId: reading.clientId,
-            readingId: reading.id,
-            type: "reading_charge",
-            amount: -totalCharged,
-            balanceBefore: clientBalanceBefore,
-            balanceAfter: clientAfter!.balance,
-            note: `Reading #${reading.id}: ${billedMinutes} min`,
-          });
-
-          // Credit reader (70%)
+        // Credit reader balance (billing service deducted from client but
+        // credits the reader only at session end via endReading)
+        if (readerEarned > 0) {
           const [readerBefore] = await tx
             .select({ balance: users.balance })
             .from(users)
-            .where(eq(users.id, reading.readerId));
+            .where(eq(users.id, fresh.readerId));
           const readerBalanceBefore = readerBefore?.balance ?? 0;
 
           const [readerAfter] = await tx
@@ -377,47 +373,83 @@ router.post(
               totalReadings: sql`${users.totalReadings} + 1`,
               updatedAt: now,
             })
-            .where(eq(users.id, reading.readerId))
+            .where(eq(users.id, fresh.readerId))
             .returning({ balance: users.balance });
 
           await tx.insert(transactions).values({
-            userId: reading.readerId,
-            readingId: reading.id,
+            userId: fresh.readerId,
+            readingId: fresh.id,
             type: "reader_payout",
             amount: readerEarned,
             balanceBefore: readerBalanceBefore,
             balanceAfter: readerAfter!.balance,
-            note: `Earned from reading #${reading.id}`,
+            note: `Earned from reading #${fresh.id}`,
           });
         }
+
+        // Record the client charge transaction (amount was already deducted
+        // by billing service ticks, this is just the ledger entry)
+        if (totalCharged > 0) {
+          const [clientNow] = await tx
+            .select({ balance: users.balance })
+            .from(users)
+            .where(eq(users.id, fresh.clientId));
+
+          await tx.insert(transactions).values({
+            userId: fresh.clientId,
+            readingId: fresh.id,
+            type: "reading_charge",
+            amount: -totalCharged,
+            balanceBefore: (clientNow?.balance ?? 0) + totalCharged,
+            balanceAfter: clientNow?.balance ?? 0,
+            note: `Reading #${fresh.id}: ${Math.ceil(durationSeconds / 60)} min`,
+          });
+        }
+
+        finalReading = {
+          ...fresh,
+          status: "completed",
+          completedAt: now,
+          durationSeconds,
+          totalCharged,
+          readerEarned,
+          platformEarned,
+        };
       });
+
+      const r = finalReading;
 
       // Notify both participants
       wsService.broadcast(
         [reading.clientId, reading.readerId],
         "reading:ended",
-        { readingId: reading.id, durationSeconds, totalCharged, readerEarned },
+        {
+          readingId: reading.id,
+          durationSeconds: r.durationSeconds,
+          totalCharged: r.totalCharged,
+          readerEarned: r.readerEarned,
+        },
       );
 
       logger.info(
         {
           readingId: reading.id,
-          durationSeconds,
-          totalCharged,
-          readerEarned,
-          platformEarned,
+          durationSeconds: r.durationSeconds,
+          totalCharged: r.totalCharged,
+          readerEarned: r.readerEarned,
+          platformEarned: r.platformEarned,
         },
         "Reading ended and billing finalized",
       );
 
       res.json({
         readingId: reading.id,
-        durationSeconds,
-        totalCharged,
-        readerEarned,
-        platformEarned,
-        duration: durationSeconds,
-        totalCost: totalCharged,
+        durationSeconds: r.durationSeconds,
+        totalCharged: r.totalCharged,
+        readerEarned: r.readerEarned,
+        platformEarned: r.platformEarned,
+        duration: r.durationSeconds,
+        totalCost: r.totalCharged,
         ratePerMinute: reading.ratePerMinute,
       });
     } catch (err) {
