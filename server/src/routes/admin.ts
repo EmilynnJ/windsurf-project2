@@ -394,7 +394,26 @@ router.post("/payouts/:readerId", async (req, res, next) => {
     const amount = reader.balance;
     const balanceBefore = reader.balance;
 
-    // Optimistic lock: only reset if balance hasn't changed
+    // CRITICAL: Do the Stripe transfer FIRST, before zeroing balance.
+    // If Stripe fails, the reader's balance remains untouched.
+    let transfer: any;
+    try {
+      transfer = await stripe.transfers.create({
+        amount,
+        currency: "usd",
+        destination: reader.stripeAccountId,
+        metadata: { readerId: String(readerId), adminId: String(req.user!.id) },
+      });
+    } catch (stripeErr) {
+      logger.error(
+        { readerId, amount, err: stripeErr },
+        "Stripe transfer failed -- reader balance NOT zeroed",
+      );
+      res.status(502).json({ error: "Stripe transfer failed. Reader balance unchanged." });
+      return;
+    }
+
+    // Stripe succeeded -- now zero the balance with optimistic lock
     const result = await db
       .update(users)
       .set({ balance: 0, updatedAt: new Date() })
@@ -404,16 +423,14 @@ router.post("/payouts/:readerId", async (req, res, next) => {
       .returning({ id: users.id });
 
     if (!result.length) {
-      res.status(409).json({ error: "Balance changed, please retry" });
+      // Balance changed between check and update -- log for manual reconciliation
+      logger.error(
+        { readerId, amount, transferId: transfer.id },
+        "Balance changed after Stripe transfer -- needs manual reconciliation",
+      );
+      res.status(409).json({ error: "Balance changed during payout. Stripe transfer succeeded -- manual reconciliation needed." });
       return;
     }
-
-    const transfer = await stripe.transfers.create({
-      amount,
-      currency: "usd",
-      destination: reader.stripeAccountId,
-      metadata: { readerId: String(readerId), adminId: String(req.user!.id) },
-    });
 
     await db.insert(transactions).values({
       userId: readerId,

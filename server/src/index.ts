@@ -74,8 +74,9 @@ app.use(
 app.use(generalLimiter);
 
 // ─── Stripe webhook needs raw body for signature verification ───────────────
-// Must be before express.json()
+// Must be before express.json() — both paths supported for compat
 app.use('/api/payments/webhook', webhookLimiter);
+app.use('/api/webhooks/stripe', webhookLimiter);
 
 // ─── JSON parsing for everything else ───────────────────────────────────────
 app.use(express.json({ limit: '2mb' }));
@@ -108,13 +109,14 @@ app.use('/api/readings', readingRoutes);
 // Payment routes
 app.use('/api/payments', paymentRoutes);
 
-// Transaction history (separate from payments per build guide)
-app.use('/api/transactions', (_req, res, next) => {
-  // Forward to payment transactions route
-  // This is handled directly in payment routes as /transactions
-  // The redirect pattern here allows /api/transactions as top-level
-  next();
-});
+// Stripe webhook at build-guide path: POST /api/webhooks/stripe
+// Mounts the same webhook handler at the canonical path from section 12.4
+import webhookRoutes from './routes/webhooks';
+app.use('/api/webhooks', webhookRoutes);
+
+// Top-level GET /api/transactions per build guide section 12.4
+import transactionRoutes from './routes/transactions';
+app.use('/api', transactionRoutes);
 
 // Forum routes
 app.use('/api/forum', forumRoutes);

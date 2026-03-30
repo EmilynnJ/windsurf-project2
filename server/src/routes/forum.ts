@@ -71,6 +71,11 @@ const createPostSchema = z.object({ title: z.string().min(1).max(255), content: 
 router.post("/posts", requireAuth, validateBody(createPostSchema), async (req, res, next) => {
   try {
     const db = getDb();
+    // Announcements category: only admins can create posts (section 10.2)
+    if (req.body.category === "Announcements" && req.user!.role !== "admin") {
+      res.status(403).json({ error: "Only admins can post in the Announcements category" });
+      return;
+    }
     const [post] = await db.insert(forumPosts).values({
       authorId: req.user!.id, title: req.body.title, content: req.body.content, category: req.body.category,
     }).returning();
