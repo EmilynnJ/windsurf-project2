@@ -3,6 +3,7 @@ import {
   boolean,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   serial,
@@ -28,11 +29,19 @@ export const readingTypeEnum = pgEnum("reading_type", [
 
 export const readingStatusEnum = pgEnum("reading_status", [
   "pending",
+  "accepted",
+  "in_progress",
   "active",
   "paused",
   "completed",
   "cancelled",
   "missed",
+]);
+
+export const paymentStatusEnum = pgEnum("payment_status", [
+  "pending",
+  "paid",
+  "refunded",
 ]);
 
 export const transactionTypeEnum = pgEnum("transaction_type", [
@@ -76,6 +85,7 @@ export const users = pgTable(
 
     // Stripe Connect
     stripeAccountId: varchar("stripe_account_id", { length: 255 }),
+    stripeCustomerId: varchar("stripe_customer_id", { length: 255 }),
 
     // Timestamps
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -125,6 +135,12 @@ export const readings = pgTable(
     // Agora
     agoraChannel: varchar("agora_channel", { length: 255 }),
 
+    // Payment
+    paymentStatus: paymentStatusEnum("payment_status").notNull().default("pending"),
+
+    // Chat transcript (chat sessions only)
+    chatTranscript: jsonb("chat_transcript"),
+
     // Rating
     rating: integer("rating"), // 1-5 stars
     review: text("review"),
@@ -160,6 +176,7 @@ export const transactions = pgTable(
 
     type: transactionTypeEnum("type").notNull(),
     amount: integer("amount").notNull(), // cents (positive = credit, negative = debit)
+    balanceBefore: integer("balance_before").notNull().default(0), // balance before this tx
     balanceAfter: integer("balance_after").notNull(), // balance after this tx
 
     note: text("note"),
@@ -195,6 +212,7 @@ export const forumPosts = pgTable(
 
     isPinned: boolean("is_pinned").notNull().default(false),
     isLocked: boolean("is_locked").notNull().default(false),
+    flagCount: integer("flag_count").notNull().default(0),
 
     // Timestamps
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -225,6 +243,7 @@ export const forumComments = pgTable(
       .references(() => users.id),
 
     content: text("content").notNull(),
+    flagCount: integer("flag_count").notNull().default(0),
 
     // Timestamps
     createdAt: timestamp("created_at", { withTimezone: true })

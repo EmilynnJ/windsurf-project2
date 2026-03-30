@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { eq } from 'drizzle-orm';
-import { db } from '../db/db';
+import { getDb } from '../db/db';
 import { users, readings } from '../db/schema';
 import { logger } from '../utils/logger';
 import '../types';
@@ -16,6 +16,7 @@ export async function resolveUser(
       res.status(401).json({ error: 'Missing authentication subject' });
       return;
     }
+    const db = getDb();
     const [user] = await db
       .select()
       .from(users)
@@ -58,6 +59,7 @@ export async function requireParticipant(
       res.status(400).json({ error: 'Invalid reading ID' });
       return;
     }
+    const db = getDb();
     const [reading] = await db
       .select()
       .from(readings)

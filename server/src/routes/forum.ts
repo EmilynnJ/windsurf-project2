@@ -71,6 +71,11 @@ const createPostSchema = z.object({ title: z.string().min(1).max(255), content: 
 router.post("/posts", requireAuth, validateBody(createPostSchema), async (req, res, next) => {
   try {
     const db = getDb();
+    // Announcements category: only admins can create posts (section 10.2)
+    if (req.body.category === "Announcements" && req.user!.role !== "admin") {
+      res.status(403).json({ error: "Only admins can post in the Announcements category" });
+      return;
+    }
     const [post] = await db.insert(forumPosts).values({
       authorId: req.user!.id, title: req.body.title, content: req.body.content, category: req.body.category,
     }).returning();
@@ -93,7 +98,57 @@ router.post("/posts/:id/comments", requireAuth, validateBody(createCommentSchema
   } catch (err) { next(err); }
 });
 
-// ─── Flag content ───────────────────────────────────────────────────────────
+// ─── Flag post — POST /api/forum/posts/:id/flag ─────────────────────────────
+const flagPostSchema = z.object({ reason: z.string().min(1).max(1000) });
+
+router.post("/posts/:id/flag", requireAuth, validateBody(flagPostSchema), async (req, res, next) => {
+  try {
+    const db = getDb();
+    const postId = parseInt(req.params.id!, 10);
+    if (isNaN(postId)) { res.status(400).json({ error: "Invalid post ID" }); return; }
+
+    const [post] = await db.select({ id: forumPosts.id }).from(forumPosts).where(eq(forumPosts.id, postId));
+    if (!post) { res.status(404).json({ error: "Post not found" }); return; }
+
+    const [flag] = await db.insert(forumFlags).values({
+      reporterId: req.user!.id, postId, reason: req.body.reason,
+    }).returning();
+
+    // Increment flag count on the post
+    await db.update(forumPosts).set({
+      flagCount: sql`${forumPosts.flagCount} + 1`,
+      updatedAt: new Date(),
+    }).where(eq(forumPosts.id, postId));
+
+    res.status(201).json(flag);
+  } catch (err) { next(err); }
+});
+
+// ─── Flag comment — POST /api/forum/comments/:id/flag ───────────────────────
+router.post("/comments/:id/flag", requireAuth, validateBody(flagPostSchema), async (req, res, next) => {
+  try {
+    const db = getDb();
+    const commentId = parseInt(req.params.id!, 10);
+    if (isNaN(commentId)) { res.status(400).json({ error: "Invalid comment ID" }); return; }
+
+    const [comment] = await db.select({ id: forumComments.id }).from(forumComments).where(eq(forumComments.id, commentId));
+    if (!comment) { res.status(404).json({ error: "Comment not found" }); return; }
+
+    const [flag] = await db.insert(forumFlags).values({
+      reporterId: req.user!.id, commentId, reason: req.body.reason,
+    }).returning();
+
+    // Increment flag count on the comment
+    await db.update(forumComments).set({
+      flagCount: sql`${forumComments.flagCount} + 1`,
+      updatedAt: new Date(),
+    }).where(eq(forumComments.id, commentId));
+
+    res.status(201).json(flag);
+  } catch (err) { next(err); }
+});
+
+// ─── Legacy flag endpoint (backward compat) ─────────────────────────────────
 const flagSchema = z.object({ postId: z.number().int().optional(), commentId: z.number().int().optional(), reason: z.string().min(1).max(1000) });
 
 router.post("/flags", requireAuth, validateBody(flagSchema), async (req, res, next) => {
