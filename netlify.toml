@@ -9,6 +9,8 @@
 [build.environment]
   NODE_VERSION = "20"
   NPM_FLAGS = "--legacy-peer-deps"
+  # Omit publishable keys from secrets scanning to prevent false positives
+  SECRETS_SCAN_OMIT_KEYS = "VITE_AGORA_APP_ID,VITE_STRIPE_PUBLISHABLE_KEY,STRIPE_PUBLISHABLE_KEY,AGORA_APP_ID"
 
 # ─── Redirects ───────────────────────────────────────────────────────────────
 # Order matters: more specific rules first, SPA fallback last.
