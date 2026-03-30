@@ -53,7 +53,8 @@ export interface ReaderPublic {
 /* ─────────────────────────────────────────────────────────────── Readings ───── */
 
 export type ReadingType = 'chat' | 'voice' | 'video';
-export type ReadingStatus = 'pending' | 'active' | 'paused' | 'completed' | 'cancelled' | 'missed' | 'in_progress';
+export type ReadingStatus = 'pending' | 'accepted' | 'in_progress' | 'active' | 'paused' | 'completed' | 'cancelled' | 'missed';
+export type PaymentStatus = 'pending' | 'paid' | 'refunded';
 
 export interface Reading {
   id: number;
@@ -71,6 +72,8 @@ export interface Reading {
   platformEarned: number;
   agoraChannel?: string;
   agoraToken?: string;
+  paymentStatus: PaymentStatus;
+  chatTranscript?: any[];
   rating?: number;
   review?: string;
   startedAt?: string;
@@ -96,6 +99,7 @@ export interface Transaction {
   readingId?: number;
   type: TransactionType;
   amount: number; // cents (positive = credit, negative = debit)
+  balanceBefore: number;
   balanceAfter: number;
   note?: string;
   stripePaymentIntentId?: string;
