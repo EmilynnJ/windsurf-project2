@@ -30,6 +30,8 @@ async function createApp() {
   const paymentRoutes = (await import('../server/dist/src/routes/payments.js')).default;
   const forumRoutes = (await import('../server/dist/src/routes/forum.js')).default;
   const adminRoutes = (await import('../server/dist/src/routes/admin.js')).default;
+  const transactionRoutes = (await import('../server/dist/src/routes/transactions.js')).default;
+  const webhookRoutes = (await import('../server/dist/src/routes/webhooks.js')).default;
 
   app = express();
 
@@ -59,6 +61,8 @@ async function createApp() {
   app.use('/api/payments', paymentRoutes);
   app.use('/api/forum', forumRoutes);
   app.use('/api/admin', adminRoutes);
+  app.use('/api', transactionRoutes);
+  app.use('/api/webhooks', webhookRoutes);
 
   // 404
   app.use((_req, res) => { res.status(404).json({ error: 'Not found' }); });
