@@ -16,7 +16,8 @@ const callbackSchema = z.object({
   profileImage: z.string().url().optional(),
 });
 
-router.post("/callback", requireAuth, validateBody(callbackSchema), async (req, res, next) => {
+// POST /api/auth/sync — Sync Auth0 user to internal DB on first login
+router.post("/sync", requireAuth, validateBody(callbackSchema), async (req, res, next) => {
   try {
     const db = getDb();
     const body = req.body;

@@ -39,7 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       // Sync user with backend (creates or updates the user record)
-      const userData = await apiService.post<User>('/api/auth/callback', {
+      const userData = await apiService.post<User>('/api/auth/sync', {
         auth0Id: auth0User.sub,
         email: auth0User.email,
         fullName: auth0User.name,

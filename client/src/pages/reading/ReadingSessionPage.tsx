@@ -326,7 +326,7 @@ function PostSessionSummary({
     }
     setSubmitting(true);
     try {
-      await apiService.post(`/api/readings/${readingId}/review`, {
+      await apiService.post(`/api/readings/${readingId}/rate`, {
         rating,
         review: reviewText.trim() || undefined,
       });
@@ -470,9 +470,13 @@ export function ReadingSessionPage() {
         setConnectionState('connecting');
 
         // Get Agora token from API
-        const tokenData = await apiService.get<{ token: string; uid: number }>(
-          `/api/readings/${reading!.id}/agora-token`
-        );
+        const tokenData = await apiService.post<{
+          rtcToken: string;
+          rtmToken: string;
+          channelName: string;
+          uid: number;
+          expiration: number;
+        }>(`/api/readings/${reading!.id}/agora-token`);
 
         if (!mounted) return;
 
@@ -483,7 +487,7 @@ export function ReadingSessionPage() {
           const { default: AgoraRTM } = await import('agora-rtm-sdk');
           const rtmClient = new AgoraRTM.RTM(appId, String(tokenData.uid));
           
-          await rtmClient.login();
+          await rtmClient.login({ token: tokenData.rtmToken });
           
           const channelName = reading!.agoraChannel!;
           
@@ -517,7 +521,7 @@ export function ReadingSessionPage() {
           const AgoraRTC = (await import('agora-rtc-sdk-ng')).default;
           const rtcClient = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
 
-          await rtcClient.join(appId, reading!.agoraChannel!, tokenData.token, tokenData.uid);
+          await rtcClient.join(appId, reading!.agoraChannel!, tokenData.rtcToken, tokenData.uid);
 
           if (reading!.type === 'video') {
             const [audioTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
