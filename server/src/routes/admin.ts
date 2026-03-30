@@ -520,6 +520,40 @@ router.post("/readings/:id/refund", async (req, res, next) => {
   }
 });
 
+// ─── GET /api/admin/forum/posts — All forum posts for moderation ─────────────
+router.get("/forum/posts", async (req, res, next) => {
+  try {
+    const db = getDb();
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+    const offset = parseInt(req.query.offset as string) || 0;
+
+    const posts = await db
+      .select({
+        id: forumPosts.id,
+        authorId: forumPosts.authorId,
+        title: forumPosts.title,
+        content: forumPosts.content,
+        category: forumPosts.category,
+        isPinned: forumPosts.isPinned,
+        isLocked: forumPosts.isLocked,
+        flagCount: forumPosts.flagCount,
+        createdAt: forumPosts.createdAt,
+        updatedAt: forumPosts.updatedAt,
+        authorName: users.fullName,
+        authorEmail: users.email,
+      })
+      .from(forumPosts)
+      .innerJoin(users, eq(forumPosts.authorId, users.id))
+      .orderBy(desc(forumPosts.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    res.json(posts);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ─── GET /api/admin/forum/flagged — Flagged content queue ───────────────────
 router.get("/forum/flagged", async (_req, res, next) => {
   try {
