@@ -317,7 +317,7 @@ export function AdminDashboard() {
         const amt = row.amount as number;
         return (
           <span className={amt >= 0 ? 'price price--positive' : 'price price--negative'}>
-            {amt >= 0 ? '+' : ''}${(Math.abs(amt) / 100).toFixed(2)}
+            {amt >= 0 ? '+' : '-'}${(Math.abs(amt) / 100).toFixed(2)}
           </span>
         );
       },
