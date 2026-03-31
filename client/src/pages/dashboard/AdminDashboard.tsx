@@ -156,18 +156,23 @@ export function AdminDashboard() {
 
   const handleAdjustBalance = useCallback(async () => {
     if (!adjUser || !adjAmount) return;
+    const rawAmount = parseFloat(adjAmount);
+    if (Number.isNaN(rawAmount)) {
+      addToast('error', 'Invalid amount');
+      return;
+    }
     setAdjSubmitting(true);
     try {
-      const amtCents = Math.round(parseFloat(adjAmount) * 100);
+      const amtCents = Math.round(rawAmount * 100);
       await apiService.post('/api/admin/balance-adjust', {
         userId: adjUser.id,
         amount: amtCents,
         note: adjReason,
       });
       setUsers((prev) => prev.map((u) =>
-        u.id === adjUser.id ? { ...u, balance: u.balance + amtCents, accountBalance: u.balance + amtCents } : u
+        u.id === adjUser.id ? { ...u, balance: u.balance + amtCents } : u
       ));
-      addToast('success', `Balance adjusted by $${parseFloat(adjAmount).toFixed(2)} for ${adjUser.fullName || adjUser.email}`);
+      addToast('success', `Balance adjusted by $${(amtCents / 100).toFixed(2)} for ${adjUser.fullName || adjUser.email}`);
       setAdjUser(null);
     } catch {
       addToast('error', 'Failed to adjust balance');
