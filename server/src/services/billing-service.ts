@@ -136,39 +136,49 @@ class BillingService {
     if (!reading) return;
 
     await db.transaction(async (tx) => {
+      // Re-fetch inside transaction to prevent race with readings/:id/end
+      const [fresh] = await tx
+        .select()
+        .from(readings)
+        .where(eq(readings.id, readingId));
+
+      if (!fresh || fresh.status === "completed" || fresh.status === "cancelled") {
+        return; // Already finalized by another path
+      }
+
       // Update reading status
       await tx
         .update(readings)
         .set({
           status,
           completedAt: now,
-          paymentStatus: reading.totalCharged > 0 ? "paid" : "pending",
+          paymentStatus: fresh.totalCharged > 0 ? "paid" : "pending",
           updatedAt: now,
         })
         .where(eq(readings.id, readingId));
 
-      // Credit reader balance
-      if (reading.readerEarned > 0) {
+      // Credit reader balance using fresh data
+      if (fresh.readerEarned > 0) {
         const [readerBefore] = await tx
           .select({ balance: users.balance })
           .from(users)
-          .where(eq(users.id, reading.readerId));
+          .where(eq(users.id, fresh.readerId));
 
         const [readerAfter] = await tx
           .update(users)
           .set({
-            balance: sql`${users.balance} + ${reading.readerEarned}`,
+            balance: sql`${users.balance} + ${fresh.readerEarned}`,
             totalReadings: sql`${users.totalReadings} + 1`,
             updatedAt: now,
           })
-          .where(eq(users.id, reading.readerId))
+          .where(eq(users.id, fresh.readerId))
           .returning({ balance: users.balance });
 
         await tx.insert(transactions).values({
-          userId: reading.readerId,
+          userId: fresh.readerId,
           readingId,
           type: "reader_payout",
-          amount: reading.readerEarned,
+          amount: fresh.readerEarned,
           balanceBefore: readerBefore?.balance ?? 0,
           balanceAfter: readerAfter?.balance ?? 0,
           note: `Earned from reading #${readingId}`,
@@ -176,18 +186,18 @@ class BillingService {
       }
 
       // Record client charge transaction
-      if (reading.totalCharged > 0) {
+      if (fresh.totalCharged > 0) {
         const [clientAfter] = await tx
           .select({ balance: users.balance })
           .from(users)
-          .where(eq(users.id, reading.clientId));
+          .where(eq(users.id, fresh.clientId));
 
         await tx.insert(transactions).values({
-          userId: reading.clientId,
+          userId: fresh.clientId,
           readingId,
           type: "reading_charge",
-          amount: -reading.totalCharged,
-          balanceBefore: (clientAfter?.balance ?? 0) + reading.totalCharged,
+          amount: -fresh.totalCharged,
+          balanceBefore: (clientAfter?.balance ?? 0) + fresh.totalCharged,
           balanceAfter: clientAfter?.balance ?? 0,
           note: `Charged for reading #${readingId}`,
         });

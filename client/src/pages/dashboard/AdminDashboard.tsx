@@ -112,9 +112,9 @@ export function AdminDashboard() {
     try {
       const newUser = await apiService.post<User>('/api/admin/readers', {
         ...crForm,
-        pricingChat: parseFloat(crForm.pricingChat) || 0,
-        pricingVoice: parseFloat(crForm.pricingVoice) || 0,
-        pricingVideo: parseFloat(crForm.pricingVideo) || 0,
+        pricingChat: Math.round((parseFloat(crForm.pricingChat) || 0) * 100),
+        pricingVoice: Math.round((parseFloat(crForm.pricingVoice) || 0) * 100),
+        pricingVideo: Math.round((parseFloat(crForm.pricingVideo) || 0) * 100),
       });
       setUsers((prev) => [...prev, newUser]);
       addToast('success', `Reader "${crForm.fullName}" created!`);
@@ -136,7 +136,7 @@ export function AdminDashboard() {
     if (!editUser) return;
     setEditSubmitting(true);
     try {
-      await apiService.patch(`/api/admin/users/${editUser.id}`, editForm);
+      await apiService.patch(`/api/admin/readers/${editUser.id}`, editForm);
       setUsers((prev) => prev.map((u) => u.id === editUser.id ? { ...u, ...editForm } : u));
       addToast('success', 'Reader updated');
       setEditUser(null);
@@ -156,17 +156,23 @@ export function AdminDashboard() {
 
   const handleAdjustBalance = useCallback(async () => {
     if (!adjUser || !adjAmount) return;
+    const rawAmount = parseFloat(adjAmount);
+    if (Number.isNaN(rawAmount)) {
+      addToast('error', 'Invalid amount');
+      return;
+    }
     setAdjSubmitting(true);
     try {
-      await apiService.post(`/api/admin/users/${adjUser.id}/adjust-balance`, {
-        amount: parseFloat(adjAmount),
-        reason: adjReason,
+      const amtCents = Math.round(rawAmount * 100);
+      await apiService.post('/api/admin/balance-adjust', {
+        userId: adjUser.id,
+        amount: amtCents,
+        note: adjReason,
       });
-      const amt = parseFloat(adjAmount);
       setUsers((prev) => prev.map((u) =>
-        u.id === adjUser.id ? { ...u, accountBalance: u.accountBalance + amt } : u
+        u.id === adjUser.id ? { ...u, balance: u.balance + amtCents } : u
       ));
-      addToast('success', `Balance adjusted by $${amt.toFixed(2)} for ${adjUser.fullName || adjUser.email}`);
+      addToast('success', `Balance adjusted by $${(amtCents / 100).toFixed(2)} for ${adjUser.fullName || adjUser.email}`);
       setAdjUser(null);
     } catch {
       addToast('error', 'Failed to adjust balance');
@@ -178,7 +184,7 @@ export function AdminDashboard() {
   /* ── Forum Moderation ── */
   const handleDeletePost = useCallback(async (postId: number) => {
     try {
-      await apiService.delete(`/api/admin/forum/posts/${postId}`);
+      await apiService.delete(`/api/admin/posts/${postId}`);
       setForumPosts((prev) => prev.filter((p) => p.id !== postId));
       addToast('success', 'Post deleted');
     } catch {
@@ -189,7 +195,7 @@ export function AdminDashboard() {
   /* ── Payout ── */
   const handlePayout = useCallback(async (userId: number) => {
     try {
-      await apiService.post(`/api/admin/readers/${userId}/payout`);
+      await apiService.post(`/api/admin/payouts/${userId}`);
       addToast('success', 'Payout initiated');
       // Refresh user data
       const u = await apiService.get<User[]>('/api/admin/users');
@@ -219,10 +225,10 @@ export function AdminDashboard() {
       ),
     },
     {
-      key: 'accountBalance',
+      key: 'balance',
       header: 'Balance',
       sortable: true,
-      render: (row) => <span className="price">${(row.accountBalance as number).toFixed(2)}</span>,
+      render: (row) => <span className="price">${((row.balance as number) / 100).toFixed(2)}</span>,
     },
     {
       key: 'isOnline',
@@ -260,9 +266,9 @@ export function AdminDashboard() {
       render: (row) => formatDate(row.createdAt as string),
     },
     {
-      key: 'type',
+      key: 'readingType',
       header: 'Type',
-      render: (row) => (row.type as string).charAt(0).toUpperCase() + (row.type as string).slice(1),
+      render: (row) => (row.readingType as string).charAt(0).toUpperCase() + (row.readingType as string).slice(1),
     },
     { key: 'clientId', header: 'Client', render: (row) => `#${row.clientId}` },
     { key: 'readerId', header: 'Reader', render: (row) => `#${row.readerId}` },
@@ -276,15 +282,15 @@ export function AdminDashboard() {
       ),
     },
     {
-      key: 'duration',
+      key: 'durationSeconds',
       header: 'Duration',
-      render: (row) => formatDuration(row.duration as number),
+      render: (row) => formatDuration(row.durationSeconds as number),
     },
     {
-      key: 'totalCost',
+      key: 'totalCharged',
       header: 'Revenue',
       sortable: true,
-      render: (row) => <span className="price">${(row.totalCost as number).toFixed(2)}</span>,
+      render: (row) => <span className="price">${((row.totalCharged as number) / 100).toFixed(2)}</span>,
     },
   ];
 
@@ -302,7 +308,7 @@ export function AdminDashboard() {
       header: 'Type',
       render: (row) => {
         const labels: Record<string, string> = {
-          top_up: 'Top Up', reading_charge: 'Reading Charge',
+          topup: 'Top Up', reading_charge: 'Reading Charge',
           reader_payout: 'Payout', refund: 'Refund', admin_adjustment: 'Adjustment',
         };
         return labels[row.type as string] || row.type;
@@ -316,22 +322,22 @@ export function AdminDashboard() {
         const amt = row.amount as number;
         return (
           <span className={amt >= 0 ? 'price price--positive' : 'price price--negative'}>
-            {amt >= 0 ? '+' : ''}${amt.toFixed(2)}
+            {amt >= 0 ? '+' : '-'}${(Math.abs(amt) / 100).toFixed(2)}
           </span>
         );
       },
     },
     {
-      key: 'description',
+      key: 'note',
       header: 'Description',
-      render: (row) => (row.description as string) || '—',
+      render: (row) => (row.note as string) || '—',
     },
   ];
 
   if (loading) return <LoadingPage message="Loading admin dashboard..." />;
 
   // ── Computed stats ──
-  const totalRevenue = readings.filter((r) => r.status === 'completed').reduce((s, r) => s + r.totalCost, 0);
+  const totalRevenue = readings.filter((r) => r.status === 'completed').reduce((s, r) => s + r.totalCharged, 0);
   const totalUsers = users.length;
   const readerCount = users.filter((u) => u.role === 'reader').length;
   const onlineReaders = users.filter((u) => u.role === 'reader' && u.isOnline).length;
@@ -353,7 +359,7 @@ export function AdminDashboard() {
     : readings;
 
   // ── Readers eligible for payout ($15 min) ──
-  const payoutReaders = users.filter((u) => u.role === 'reader' && u.accountBalance >= 15);
+  const payoutReaders = users.filter((u) => u.role === 'reader' && u.balance >= 1500);
 
   return (
     <div className="page-enter">
@@ -367,7 +373,7 @@ export function AdminDashboard() {
         <div className="grid grid--stats">
           <Stat label="Total Users" value={totalUsers} icon="👥" />
           <Stat label="Readers" value={`${onlineReaders}/${readerCount}`} icon="🔮" />
-          <Stat label="Total Revenue" value={`$${totalRevenue.toFixed(2)}`} icon="💰" />
+          <Stat label="Total Revenue" value={`$${(totalRevenue / 100).toFixed(2)}`} icon="💰" />
           <Stat label="Total Readings" value={readings.length} icon="📊" />
         </div>
 
@@ -566,7 +572,7 @@ export function AdminDashboard() {
                         <div key={reader.id} className="flex justify-between items-center gap-4" style={{ padding: 'var(--space-3) 0', borderBottom: '1px solid var(--border-subtle)' }}>
                           <div>
                             <p className="body-text"><strong>{reader.fullName || reader.email}</strong></p>
-                            <p className="caption">Balance: <span className="price">${reader.accountBalance.toFixed(2)}</span></p>
+                            <p className="caption">Balance: <span className="price">${(reader.balance / 100).toFixed(2)}</span></p>
                           </div>
                           <Button
                             variant="gold"
@@ -636,7 +642,7 @@ export function AdminDashboard() {
         >
           <div className="flex flex-col gap-4">
             <p className="body-text">
-              Current balance: <span className="price">${adjUser?.accountBalance.toFixed(2)}</span>
+              Current balance: <span className="price">${((adjUser?.balance ?? 0) / 100).toFixed(2)}</span>
             </p>
             <Input
               label="Amount"
