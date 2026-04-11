@@ -47,12 +47,17 @@ function AppRoutes() {
 }
 
 export default function App() {
+  // Strip any protocol prefix — Auth0Provider expects just the domain (no https://)
+  const auth0Domain = (import.meta.env.VITE_AUTH0_DOMAIN || '')
+    .replace(/^https?:\/\//, '')
+    .replace(/\/$/, '');
+
   return (
     <Auth0Provider
-      domain={import.meta.env.VITE_AUTH0_DOMAIN || ''}
+      domain={auth0Domain}
       clientId={import.meta.env.VITE_AUTH0_CLIENT_ID || ''}
       authorizationParams={{
-        redirect_uri: window.location.origin,
+        redirect_uri: import.meta.env.VITE_AUTH0_REDIRECT_URI || window.location.origin,
         audience: import.meta.env.VITE_AUTH0_AUDIENCE || '',
       }}
     >
