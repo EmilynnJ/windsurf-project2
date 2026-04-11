@@ -440,7 +440,7 @@ a:focus-visible {
   backdrop-filter: blur(20px) saturate(150%);
   -webkit-backdrop-filter: blur(20px) saturate(150%);
   border-bottom: 1px solid var(--border-subtle);
-  z-index: var(--z-sticky);
+  z-index: 1000;
   display: flex;
   align-items: center;
   transition: background var(--transition-normal), box-shadow var(--transition-normal);
@@ -534,7 +534,7 @@ a:focus-visible {
   background: rgba(10, 10, 15, 0.98);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  z-index: var(--z-overlay);
+  z-index: 1001;
   flex-direction: column;
   padding: var(--space-6);
   gap: var(--space-2);
@@ -1673,6 +1673,22 @@ a:focus-visible {
   .card { padding: var(--space-4); }
 
   .hero { padding: var(--space-6) var(--space-4) var(--space-4); }
+
+  /* Hero — reduced 75% on mobile */
+  .section--hero { padding: var(--space-4) 0 var(--space-3); }
+  .hero__title { margin-bottom: var(--space-3); }
+  .hero__image {
+    max-width: 100%;
+    max-height: 200px;
+    margin-bottom: var(--space-3);
+    overflow: hidden;
+  }
+  .hero__image img {
+    height: 200px;
+    object-fit: cover;
+    object-position: center top;
+  }
+  .hero__tagline { font-size: 1rem; }
 
   .modal {
     margin: var(--space-3);
