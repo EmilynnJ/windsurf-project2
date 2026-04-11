@@ -52,6 +52,12 @@ export default function App() {
     .replace(/^https?:\/\//, '')
     .replace(/\/$/, '');
 
+  if (!auth0Domain || !import.meta.env.VITE_AUTH0_CLIENT_ID) {
+    console.error(
+      '[SoulSeer] Auth0 env vars missing. Ensure VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID are set in your Vercel project environment variables.'
+    );
+  }
+
   return (
     <Auth0Provider
       domain={auth0Domain}
