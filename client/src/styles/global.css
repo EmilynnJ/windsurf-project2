@@ -31,11 +31,11 @@
   /* ── Backgrounds & Surfaces ── */
   --bg-deep-black: #0A0A0F;
   --bg-deep-navy: #0D0D1A;
-  --surface-card: rgba(19, 17, 26, 0.85);
-  --surface-card-hover: rgba(26, 23, 38, 0.92);
-  --surface-elevated: rgba(30, 27, 46, 0.9);
-  --surface-input: rgba(26, 23, 38, 0.95);
-  --surface-overlay: rgba(10, 10, 15, 0.8);
+  --surface-card: rgba(19, 17, 26, 0.55);
+  --surface-card-hover: rgba(26, 23, 38, 0.68);
+  --surface-elevated: rgba(30, 27, 46, 0.62);
+  --surface-input: rgba(26, 23, 38, 0.78);
+  --surface-overlay: rgba(10, 10, 15, 0.65);
 
   /* ── Text ── */
   --text-primary: #FFFFFF;
@@ -139,17 +139,12 @@ body {
   background-repeat: no-repeat;
 }
 
-/* Dark overlay for readability */
+/* Dark overlay for readability — reduced to let background image show */
 body::before {
   content: '';
   position: fixed;
   inset: 0;
-  background: linear-gradient(
-    180deg,
-    rgba(10, 10, 15, 0.92) 0%,
-    rgba(13, 13, 26, 0.88) 40%,
-    rgba(10, 10, 15, 0.94) 100%
-  );
+  background: rgba(5, 5, 10, 0.18);
   pointer-events: none;
   z-index: 0;
 }

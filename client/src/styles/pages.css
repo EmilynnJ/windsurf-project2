@@ -999,3 +999,207 @@
   margin-left: calc(-1 * var(--space-4));
   margin-right: calc(-1 * var(--space-4));
 }
+
+/* ── Legal Cards ───────────────────────────────────────────── */
+.legal-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  text-align: center;
+  padding: var(--space-5) !important;
+}
+
+.legal-card__icon {
+  font-size: 2.2rem;
+  line-height: 1;
+}
+
+.legal-card__title {
+  font-family: var(--font-heading);
+  font-size: 1.15rem;
+  color: var(--pink);
+  margin: 0;
+}
+
+.legal-card__desc {
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  flex: 1;
+}
+
+.legal-card__coming-soon {
+  font-size: 0.78rem;
+  font-family: var(--font-body);
+  color: var(--text-muted);
+  font-style: italic;
+  letter-spacing: 0.04em;
+  border: 1px dashed var(--border-subtle);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+}
+
+/* ── Reader Application Download Banner ────────────────────── */
+.reader-app-download {
+  padding: var(--space-5) !important;
+}
+
+.reader-app-download__inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  align-items: flex-start;
+}
+
+@media (min-width: 600px) {
+  .reader-app-download__inner {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+}
+
+/* ── Reader Application Divider ─────────────────────────────── */
+.reader-app-divider {
+  position: relative;
+  text-align: center;
+}
+
+.reader-app-divider::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+.reader-app-divider__text {
+  position: relative;
+  background: transparent;
+  padding: 0 var(--space-4);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ── Reader Application Form ────────────────────────────────── */
+.reader-app-form-wrapper {
+  padding: var(--space-6) !important;
+}
+
+.reader-app-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.reader-app-form__grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-4);
+}
+
+@media (min-width: 600px) {
+  .reader-app-form__grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.reader-app-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.reader-app-form__label {
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+}
+
+.reader-app-form__required {
+  color: var(--pink);
+}
+
+.reader-app-form__hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.reader-app-form__textarea {
+  resize: vertical;
+  min-height: 100px;
+  font-family: var(--font-body);
+}
+
+.reader-app-form__checkboxes {
+  display: flex;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+  padding: var(--space-2) 0;
+}
+
+.reader-app-form__checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+}
+
+.reader-app-form__checkbox input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--pink);
+  cursor: pointer;
+}
+
+.reader-app-form__agree {
+  padding: var(--space-3) var(--space-4);
+  background: rgba(255, 105, 180, 0.05);
+  border: 1px solid rgba(255, 105, 180, 0.15);
+  border-radius: var(--radius-md);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.reader-app-form__agree a {
+  color: var(--pink);
+}
+
+.reader-app-form__error {
+  color: #FCA5A5;
+  font-size: 0.9rem;
+  padding: var(--space-3);
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: var(--radius-md);
+  margin: 0;
+}
+
+.reader-app-form__actions {
+  display: flex;
+  justify-content: center;
+  padding-top: var(--space-2);
+}
+
+/* ── Reader Application Success ─────────────────────────────── */
+.reader-app-success {
+  padding: var(--space-8) var(--space-6) !important;
+}
+
+/* ── Grid responsive override for legal on small screens ─────── */
+@media (max-width: 767px) {
+  .grid--3 .legal-card {
+    padding: var(--space-4) !important;
+  }
+}
