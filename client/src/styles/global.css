@@ -31,11 +31,11 @@
   /* ── Backgrounds & Surfaces ── */
   --bg-deep-black: #0A0A0F;
   --bg-deep-navy: #0D0D1A;
-  --surface-card: rgba(19, 17, 26, 0.85);
-  --surface-card-hover: rgba(26, 23, 38, 0.92);
-  --surface-elevated: rgba(30, 27, 46, 0.9);
-  --surface-input: rgba(26, 23, 38, 0.95);
-  --surface-overlay: rgba(10, 10, 15, 0.8);
+  --surface-card: rgba(19, 17, 26, 0.55);
+  --surface-card-hover: rgba(26, 23, 38, 0.68);
+  --surface-elevated: rgba(30, 27, 46, 0.62);
+  --surface-input: rgba(26, 23, 38, 0.78);
+  --surface-overlay: rgba(10, 10, 15, 0.65);
 
   /* ── Text ── */
   --text-primary: #FFFFFF;
@@ -139,17 +139,12 @@ body {
   background-repeat: no-repeat;
 }
 
-/* Dark overlay for readability */
+/* Dark overlay for readability — reduced to let background image show */
 body::before {
   content: '';
   position: fixed;
   inset: 0;
-  background: linear-gradient(
-    180deg,
-    rgba(10, 10, 15, 0.92) 0%,
-    rgba(13, 13, 26, 0.88) 40%,
-    rgba(10, 10, 15, 0.94) 100%
-  );
+  background: rgba(5, 5, 10, 0.18);
   pointer-events: none;
   z-index: 0;
 }
@@ -440,7 +435,7 @@ a:focus-visible {
   backdrop-filter: blur(20px) saturate(150%);
   -webkit-backdrop-filter: blur(20px) saturate(150%);
   border-bottom: 1px solid var(--border-subtle);
-  z-index: var(--z-sticky);
+  z-index: 1000;
   display: flex;
   align-items: center;
   transition: background var(--transition-normal), box-shadow var(--transition-normal);
@@ -534,7 +529,7 @@ a:focus-visible {
   background: rgba(10, 10, 15, 0.98);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  z-index: var(--z-overlay);
+  z-index: 1001;
   flex-direction: column;
   padding: var(--space-6);
   gap: var(--space-2);
@@ -1673,6 +1668,22 @@ a:focus-visible {
   .card { padding: var(--space-4); }
 
   .hero { padding: var(--space-6) var(--space-4) var(--space-4); }
+
+  /* Hero — reduced 75% on mobile */
+  .section--hero { padding: var(--space-4) 0 var(--space-3); }
+  .hero__title { margin-bottom: var(--space-3); }
+  .hero__image {
+    max-width: 100%;
+    max-height: 200px;
+    margin-bottom: var(--space-3);
+    overflow: hidden;
+  }
+  .hero__image img {
+    height: 200px;
+    object-fit: cover;
+    object-position: center top;
+  }
+  .hero__tagline { font-size: 1rem; }
 
   .modal {
     margin: var(--space-3);

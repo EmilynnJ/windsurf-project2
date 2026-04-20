@@ -32,6 +32,7 @@ async function createApp() {
   const adminRoutes = (await import('../server/dist/src/routes/admin.js')).default;
   const transactionRoutes = (await import('../server/dist/src/routes/transactions.js')).default;
   const webhookRoutes = (await import('../server/dist/src/routes/webhooks.js')).default;
+  const applicationRoutes = (await import('../server/dist/src/routes/applications.js')).default;
 
   app = express();
 
@@ -63,6 +64,7 @@ async function createApp() {
   app.use('/api/admin', adminRoutes);
   app.use('/api', transactionRoutes);
   app.use('/api/webhooks', webhookRoutes);
+  app.use('/api/reader-applications', applicationRoutes);
 
   // 404
   app.use((_req, res) => { res.status(404).json({ error: 'Not found' }); });
