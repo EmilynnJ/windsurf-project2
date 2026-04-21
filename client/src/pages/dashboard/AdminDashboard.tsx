@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useToast } from '../../components/ToastProvider';
 import { ImageUploadField } from '../../components/ImageUploadField';
+import { ChatTranscriptModal } from '../../components/ChatTranscriptModal';
 import { apiService } from '../../services/api';
 import {
   Button,
@@ -102,6 +103,9 @@ export function AdminDashboard() {
   const [adjAmount, setAdjAmount] = useState('');
   const [adjReason, setAdjReason] = useState('');
   const [adjSubmitting, setAdjSubmitting] = useState(false);
+
+  // ── Chat transcript viewer ──
+  const [transcriptReadingId, setTranscriptReadingId] = useState<number | null>(null);
 
   /* ── Load all data ── */
   useEffect(() => {
@@ -421,6 +425,26 @@ export function AdminDashboard() {
         const s = row.paymentStatus as string;
         const variant = s === 'paid' ? 'gold' : s === 'refunded' ? 'pink' : 'info';
         return <span className={`badge badge--${variant}`}>{s}</span>;
+      },
+    },
+    {
+      key: 'transcript',
+      header: '',
+      render: (row) => {
+        const status = row.status as string;
+        if (row.readingType !== 'chat' || status !== 'completed') return null;
+        return (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              setTranscriptReadingId(row.id as number);
+            }}
+          >
+            Transcript
+          </Button>
+        );
       },
     },
     {
@@ -996,6 +1020,13 @@ export function AdminDashboard() {
             />
           </div>
         </Modal>
+
+        {/* ── Chat Transcript Modal ──────────────────── */}
+        <ChatTranscriptModal
+          readingId={transcriptReadingId}
+          viewerUserId={-1}
+          onClose={() => setTranscriptReadingId(null)}
+        />
       </div>
     </div>
   );
