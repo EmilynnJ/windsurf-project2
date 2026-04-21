@@ -615,17 +615,26 @@ export function ReadingSessionPage() {
         readingId?: number;
         reason?: string;
         duration?: number;
+        durationSeconds?: number;
         totalCost?: number;
         totalCharged?: number;
         ratePerMinute?: number;
       };
       if (readingIdNum == null || p.readingId !== readingIdNum) return;
 
+      // If the HTTP /end handler (handleEndSession) already rendered the
+      // summary, don't overwrite it — unit conventions differ slightly and
+      // the HTTP response is authoritative for the initiating user.
+      if (summary) return;
+
       if (timerRef.current) clearInterval(timerRef.current);
 
-      const totalCostCents = p.totalCost ?? p.totalCharged ?? 0;
+      // Fall back to locally tracked values when the server payload is
+      // missing financial fields (e.g. auto-end triggered by the billing
+      // service's insufficient-balance / grace-period sweeper).
+      const totalCostCents = p.totalCost ?? p.totalCharged ?? Math.round(cost);
       setSummary({
-        duration: p.duration ?? elapsed,
+        duration: p.durationSeconds ?? p.duration ?? elapsed,
         totalCost: totalCostCents / 100,
         ratePerMinute: (p.ratePerMinute ?? reading?.ratePerMinute ?? 0) / 100,
       });
@@ -642,7 +651,7 @@ export function ReadingSessionPage() {
         );
       }
     },
-    [readingIdNum, elapsed, reading, addToast],
+    [readingIdNum, elapsed, cost, reading, summary, addToast],
   );
   useWebSocketEvent('reading:ended', handleEndedPush);
 

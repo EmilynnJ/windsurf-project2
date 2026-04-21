@@ -204,18 +204,32 @@ class BillingService {
       }
     });
 
+    // Re-fetch the finalized reading so we can broadcast authoritative totals
+    // to both participants (client needs these to render the session summary).
+    const [finalized] = await db
+      .select()
+      .from(readings)
+      .where(eq(readings.id, readingId));
+
     wsService.broadcast(
       [reading.clientId, reading.readerId],
       "reading:ended",
-      { readingId, status },
+      {
+        readingId,
+        status,
+        durationSeconds: finalized?.durationSeconds ?? reading.durationSeconds ?? 0,
+        totalCharged: finalized?.totalCharged ?? reading.totalCharged ?? 0,
+        readerEarned: finalized?.readerEarned ?? reading.readerEarned ?? 0,
+        ratePerMinute: reading.ratePerMinute,
+      },
     );
 
     logger.info(
       {
         readingId,
         status,
-        totalCharged: reading.totalCharged,
-        readerEarned: reading.readerEarned,
+        totalCharged: finalized?.totalCharged ?? reading.totalCharged,
+        readerEarned: finalized?.readerEarned ?? reading.readerEarned,
       },
       "Reading ended by billing service",
     );
