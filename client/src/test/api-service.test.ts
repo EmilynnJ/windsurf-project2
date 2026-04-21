@@ -1,7 +1,7 @@
 /**
  * API Service smoke tests -- verify the API client structure.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // Mock import.meta.env for the API service
 vi.stubGlobal('import', { meta: { env: { VITE_API_URL: '' } } });

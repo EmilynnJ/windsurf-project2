@@ -67,6 +67,37 @@ class ApiService {
   delete<T = unknown>(path: string): Promise<T> {
     return this.request<T>('DELETE', path);
   }
+
+  /**
+   * Upload a multipart/form-data body (e.g. file uploads). Do NOT set
+   * Content-Type manually — the browser will add the boundary for us.
+   */
+  async upload<T = unknown>(path: string, formData: FormData, method: string = 'POST'): Promise<T> {
+    const headers: Record<string, string> = {};
+    if (this.accessToken) {
+      headers['Authorization'] = `Bearer ${this.accessToken}`;
+    }
+
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers,
+      body: formData,
+    });
+
+    if (!res.ok) {
+      let errorMessage = `Request failed (${res.status})`;
+      try {
+        const data = await res.json();
+        errorMessage = data.message || data.error || errorMessage;
+      } catch {
+        /* ignore parse errors */
+      }
+      throw new Error(errorMessage);
+    }
+
+    if (res.status === 204) return undefined as T;
+    return res.json();
+  }
 }
 
 export const apiService = new ApiService();

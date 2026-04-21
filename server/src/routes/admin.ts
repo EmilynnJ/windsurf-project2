@@ -2,6 +2,7 @@ import { Router } from "express";
 import { eq, desc, sql, and, count } from "drizzle-orm";
 import { z } from "zod";
 import Stripe from "stripe";
+import multer from "multer";
 import { getDb } from "../db/db";
 import {
   users,
@@ -16,10 +17,30 @@ import { requireRole } from "../middleware/rbac";
 import { validateBody } from "../middleware/validate";
 import { config } from "../config";
 import { logger } from "../utils/logger";
+import { auth0ManagementService } from "../services/auth0-management";
+import { cloudinaryService } from "../services/cloudinary-service";
 
 const router = Router();
 const stripe = new Stripe(config.stripe.secretKey, {
   apiVersion: "2024-06-20" as any,
+});
+
+// ─── Multer: 5 MB in-memory, jpeg|png|webp only (build guide §14.2) ─────────
+const ALLOWED_IMAGE_MIME = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+const imageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (ALLOWED_IMAGE_MIME.has(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error("INVALID_IMAGE_TYPE"));
+    }
+  },
 });
 
 router.use(requireAuth);
@@ -79,16 +100,20 @@ router.get("/users", async (req, res, next) => {
 });
 
 // ─── POST /api/admin/readers — Create reader account ─────────────────────────
+// Admin provides profile details; server creates the Auth0 user automatically
+// (using the Management API), creates a Stripe Connect Express account,
+// inserts the reader into the DB, and returns a one-time generated password
+// plus a Stripe Connect onboarding URL for the admin to hand to the reader.
 const createReaderSchema = z.object({
-  auth0Id: z.string().min(1),
   email: z.string().email(),
-  fullName: z.string().min(1),
+  fullName: z.string().min(1).max(255),
   username: z.string().min(3).max(50).optional(),
   bio: z.string().max(2000).optional(),
   specialties: z.string().max(500).optional(),
-  pricingChat: z.number().int().min(0).default(0),
-  pricingVoice: z.number().int().min(0).default(0),
-  pricingVideo: z.number().int().min(0).default(0),
+  profileImage: z.string().url().max(512).optional(),
+  pricingChat: z.number().int().min(0).max(100_000).default(0),
+  pricingVoice: z.number().int().min(0).max(100_000).default(0),
+  pricingVideo: z.number().int().min(0).max(100_000).default(0),
 });
 
 router.post("/readers", validateBody(createReaderSchema), async (req, res, next) => {
@@ -96,36 +121,76 @@ router.post("/readers", validateBody(createReaderSchema), async (req, res, next)
     const db = getDb();
     const body = req.body;
 
-    // Check for duplicate
-    const [existing] = await db
-      .select()
-      .from(users)
-      .where(eq(users.auth0Id, body.auth0Id));
-    if (existing) {
-      res.status(409).json({ error: "User already exists" });
+    if (!auth0ManagementService.enabled) {
+      res.status(503).json({
+        error:
+          "Auth0 Management API is not configured. Set AUTH0_MGMT_CLIENT_ID and AUTH0_MGMT_CLIENT_SECRET.",
+        code: "AUTH0_MGMT_DISABLED",
+      });
       return;
     }
 
-    // Create Stripe Connect Express account for reader
-    const account = await stripe.accounts.create({
-      type: "express",
-      email: body.email,
-      capabilities: {
-        card_payments: { requested: true },
-        transfers: { requested: true },
-      },
-    });
+    // Reject duplicates by email up front — Auth0 would also 409 but we want a
+    // clean error before we create any Stripe state.
+    const [existingByEmail] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, body.email));
+    if (existingByEmail) {
+      res.status(409).json({ error: `A user with email ${body.email} already exists` });
+      return;
+    }
 
+    // 1) Create the Auth0 user (generates a secure initial password).
+    let auth0Result: { auth0Id: string; password: string };
+    try {
+      auth0Result = await auth0ManagementService.createUserWithPassword({
+        email: body.email,
+        fullName: body.fullName,
+        username: body.username ?? null,
+      });
+    } catch (err) {
+      res.status(502).json({ error: (err as Error).message, code: "AUTH0_CREATE_FAILED" });
+      return;
+    }
+
+    // 2) Create a Stripe Connect Express account for payouts.
+    let account: Stripe.Account;
+    try {
+      account = await stripe.accounts.create({
+        type: "express",
+        email: body.email,
+        capabilities: {
+          card_payments: { requested: true },
+          transfers: { requested: true },
+        },
+        metadata: { auth0Id: auth0Result.auth0Id, source: "admin-provisioned" },
+      });
+    } catch (err) {
+      logger.error(
+        { err, auth0Id: auth0Result.auth0Id },
+        "Stripe Connect account creation failed after Auth0 user was created",
+      );
+      res.status(502).json({
+        error:
+          "Auth0 user was created but Stripe Connect account creation failed. Please retry or remove the Auth0 user manually.",
+        code: "STRIPE_ACCOUNT_FAILED",
+      });
+      return;
+    }
+
+    // 3) Insert the reader into our DB.
     const [reader] = await db
       .insert(users)
       .values({
-        auth0Id: body.auth0Id,
+        auth0Id: auth0Result.auth0Id,
         email: body.email,
         fullName: body.fullName,
         username: body.username ?? null,
         role: "reader",
         bio: body.bio ?? null,
         specialties: body.specialties ?? null,
+        profileImage: body.profileImage ?? null,
         pricingChat: body.pricingChat,
         pricingVoice: body.pricingVoice,
         pricingVideo: body.pricingVideo,
@@ -133,7 +198,7 @@ router.post("/readers", validateBody(createReaderSchema), async (req, res, next)
       })
       .returning();
 
-    // Generate onboarding link
+    // 4) Generate a Stripe Connect onboarding link.
     const accountLink = await stripe.accountLinks.create({
       account: account.id,
       refresh_url: `${config.corsOrigin}/dashboard`,
@@ -143,14 +208,79 @@ router.post("/readers", validateBody(createReaderSchema), async (req, res, next)
 
     logger.info(
       { readerId: reader!.id, email: body.email, adminId: req.user!.id },
-      "Reader created by admin",
+      "Reader created by admin (Auth0 + Stripe Connect provisioned)",
     );
 
-    res.status(201).json({ reader, stripeOnboardingUrl: accountLink.url });
+    // NOTE: The generated password is returned ONCE to the admin. The admin is
+    // responsible for delivering it securely to the reader. We do not persist
+    // the password anywhere.
+    res.status(201).json({
+      reader,
+      credentials: {
+        email: body.email,
+        initialPassword: auth0Result.password,
+      },
+      stripeOnboardingUrl: accountLink.url,
+    });
   } catch (err) {
     next(err);
   }
 });
+
+// ─── POST /api/admin/upload/image — Upload a profile image to Cloudinary ─────
+// Accepts multipart/form-data with a single `file` field. Returns `{ url }`.
+router.post(
+  "/upload/image",
+  (req, res, next) => {
+    imageUpload.single("file")(req, res, (err?: unknown) => {
+      if (!err) {
+        next();
+        return;
+      }
+      if (err instanceof multer.MulterError) {
+        if (err.code === "LIMIT_FILE_SIZE") {
+          res.status(413).json({ error: "Image must be 5 MB or smaller" });
+          return;
+        }
+        res.status(400).json({ error: err.message });
+        return;
+      }
+      if ((err as Error).message === "INVALID_IMAGE_TYPE") {
+        res.status(415).json({ error: "Only JPEG, PNG, and WebP images are allowed" });
+        return;
+      }
+      next(err as Error);
+    });
+  },
+  async (req, res, next) => {
+    try {
+      if (!req.file) {
+        res.status(400).json({ error: "No file uploaded (expected field name: file)" });
+        return;
+      }
+      if (!cloudinaryService.enabled) {
+        res.status(503).json({
+          error: "Image uploads are not configured. Set CLOUDINARY_* env vars.",
+          code: "CLOUDINARY_DISABLED",
+        });
+        return;
+      }
+
+      const { url } = await cloudinaryService.uploadBuffer(req.file.buffer, {
+        folder: "soulseer/readers",
+      });
+
+      logger.info(
+        { adminId: req.user!.id, size: req.file.size, mime: req.file.mimetype },
+        "Reader profile image uploaded",
+      );
+
+      res.json({ url });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 // ─── PATCH /api/admin/readers/:id — Edit reader profile ─────────────────────
 const editReaderSchema = z.object({
@@ -158,7 +288,7 @@ const editReaderSchema = z.object({
   username: z.string().min(3).max(50).optional(),
   bio: z.string().max(2000).optional(),
   specialties: z.string().max(500).optional(),
-  profileImage: z.string().url().max(512).optional(),
+  profileImage: z.string().url().max(512).nullable().optional(),
   pricingChat: z.number().int().min(0).max(100_000).optional(),
   pricingVoice: z.number().int().min(0).max(100_000).optional(),
   pricingVideo: z.number().int().min(0).max(100_000).optional(),

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useToast } from '../../components/ToastProvider';
+import { ImageUploadField } from '../../components/ImageUploadField';
 import { apiService } from '../../services/api';
 import {
   Button,
@@ -64,12 +65,25 @@ export function AdminDashboard() {
   const [crForm, setCrForm] = useState({
     fullName: '', email: '', username: '', bio: '',
     specialties: '', pricingChat: '', pricingVoice: '', pricingVideo: '',
+    profileImage: '' as string,
   });
   const [crSubmitting, setCrSubmitting] = useState(false);
+  // After a reader is created, show the one-time credentials + onboarding link.
+  const [createdCreds, setCreatedCreds] = useState<null | {
+    fullName: string;
+    email: string;
+    password: string;
+    stripeOnboardingUrl: string;
+  }>(null);
 
   // ── Edit Reader Modal ──
   const [editUser, setEditUser] = useState<User | null>(null);
-  const [editForm, setEditForm] = useState({ fullName: '', bio: '', specialties: '' });
+  const [editForm, setEditForm] = useState({
+    fullName: '',
+    bio: '',
+    specialties: '',
+    profileImage: '' as string,
+  });
   const [editSubmitting, setEditSubmitting] = useState(false);
 
   // ── Balance Adjustment Modal ──
@@ -110,15 +124,36 @@ export function AdminDashboard() {
     }
     setCrSubmitting(true);
     try {
-      const newUser = await apiService.post<User>('/api/admin/readers', {
-        ...crForm,
+      const payload: Record<string, unknown> = {
+        fullName: crForm.fullName,
+        email: crForm.email,
         pricingChat: Math.round((parseFloat(crForm.pricingChat) || 0) * 100),
         pricingVoice: Math.round((parseFloat(crForm.pricingVoice) || 0) * 100),
         pricingVideo: Math.round((parseFloat(crForm.pricingVideo) || 0) * 100),
-      });
-      setUsers((prev) => [...prev, newUser]);
+      };
+      if (crForm.username) payload.username = crForm.username;
+      if (crForm.bio) payload.bio = crForm.bio;
+      if (crForm.specialties) payload.specialties = crForm.specialties;
+      if (crForm.profileImage) payload.profileImage = crForm.profileImage;
+
+      const res = await apiService.post<{
+        reader: User;
+        credentials: { email: string; initialPassword: string };
+        stripeOnboardingUrl: string;
+      }>('/api/admin/readers', payload);
+
+      setUsers((prev) => [...prev, res.reader]);
       addToast('success', `Reader "${crForm.fullName}" created!`);
-      setCrForm({ fullName: '', email: '', username: '', bio: '', specialties: '', pricingChat: '', pricingVoice: '', pricingVideo: '' });
+      setCreatedCreds({
+        fullName: crForm.fullName,
+        email: res.credentials.email,
+        password: res.credentials.initialPassword,
+        stripeOnboardingUrl: res.stripeOnboardingUrl,
+      });
+      setCrForm({
+        fullName: '', email: '', username: '', bio: '', specialties: '',
+        pricingChat: '', pricingVoice: '', pricingVideo: '', profileImage: '',
+      });
     } catch (err) {
       addToast('error', err instanceof Error ? err.message : 'Failed to create reader');
     } finally {
@@ -129,15 +164,34 @@ export function AdminDashboard() {
   /* ── Edit Reader ── */
   const openEditModal = (u: User) => {
     setEditUser(u);
-    setEditForm({ fullName: u.fullName || '', bio: u.bio || '', specialties: u.specialties || '' });
+    setEditForm({
+      fullName: u.fullName || '',
+      bio: u.bio || '',
+      specialties: u.specialties || '',
+      profileImage: u.profileImage || '',
+    });
   };
 
   const handleEditReader = useCallback(async () => {
     if (!editUser) return;
     setEditSubmitting(true);
     try {
-      await apiService.patch(`/api/admin/readers/${editUser.id}`, editForm);
-      setUsers((prev) => prev.map((u) => u.id === editUser.id ? { ...u, ...editForm } : u));
+      const payload: Record<string, unknown> = {
+        fullName: editForm.fullName,
+        bio: editForm.bio,
+        specialties: editForm.specialties,
+      };
+      // Include profileImage when it changed. Empty string means "remove" → send null
+      // so the server clears the field; truthy means "update" → send the new URL.
+      const original = editUser.profileImage || '';
+      const current = editForm.profileImage || '';
+      if (current !== original) {
+        payload.profileImage = current ? current : null;
+      }
+      await apiService.patch(`/api/admin/readers/${editUser.id}`, payload);
+      setUsers((prev) =>
+        prev.map((u) => (u.id === editUser.id ? { ...u, ...editForm } : u)),
+      );
       addToast('success', 'Reader updated');
       setEditUser(null);
     } catch {
@@ -445,6 +499,15 @@ export function AdminDashboard() {
                         placeholder="Tell clients about this reader's gifts and experience..."
                       />
                     </div>
+                    <div className="form-group form-group--full">
+                      <ImageUploadField
+                        label="Profile Image (optional)"
+                        value={crForm.profileImage || null}
+                        onChange={(url) =>
+                          setCrForm((p) => ({ ...p, profileImage: url ?? '' }))
+                        }
+                      />
+                    </div>
                     <Input
                       label="Chat Rate ($/min)"
                       type="number"
@@ -622,7 +685,102 @@ export function AdminDashboard() {
               onChange={(e) => setEditForm((p) => ({ ...p, specialties: e.target.value }))}
               help="Comma-separated"
             />
+            <ImageUploadField
+              label="Profile Image"
+              value={editForm.profileImage || null}
+              onChange={(url) =>
+                setEditForm((p) => ({ ...p, profileImage: url ?? '' }))
+              }
+            />
           </div>
+        </Modal>
+
+        {/* ── Created Reader Credentials Modal (one-time) ─────────── */}
+        <Modal
+          open={!!createdCreds}
+          onClose={() => setCreatedCreds(null)}
+          title="Reader Account Created"
+          footer={
+            <Button variant="primary" onClick={() => setCreatedCreds(null)}>
+              Done
+            </Button>
+          }
+        >
+          {createdCreds && (
+            <div className="flex flex-col gap-4">
+              <p className="body-text">
+                Share these credentials with <strong>{createdCreds.fullName}</strong> securely.
+                <br />
+                <strong style={{ color: 'var(--color-primary, #FF69B4)' }}>
+                  This password will not be shown again.
+                </strong>
+              </p>
+              <div
+                className="card"
+                style={{ padding: 'var(--space-4)', background: 'rgba(255,255,255,0.04)' }}
+              >
+                <dl className="flex flex-col gap-2" style={{ margin: 0 }}>
+                  <div className="flex justify-between items-center gap-3 flex-wrap">
+                    <dt className="caption">Email</dt>
+                    <dd style={{ margin: 0, fontFamily: 'ui-monospace, monospace' }}>
+                      {createdCreds.email}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between items-center gap-3 flex-wrap">
+                    <dt className="caption">Temporary Password</dt>
+                    <dd style={{ margin: 0, fontFamily: 'ui-monospace, monospace' }}>
+                      {createdCreds.password}
+                    </dd>
+                  </div>
+                </dl>
+                <div className="flex gap-2 flex-wrap" style={{ marginTop: 'var(--space-3)' }}>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(
+                        `Email: ${createdCreds.email}\nTemporary Password: ${createdCreds.password}`,
+                      );
+                      addToast('success', 'Credentials copied to clipboard');
+                    }}
+                  >
+                    Copy credentials
+                  </Button>
+                </div>
+              </div>
+              <div className="body-text">
+                <p style={{ marginBottom: 'var(--space-2)' }}>
+                  To receive payouts, the reader must complete their Stripe Connect onboarding:
+                </p>
+                <a
+                  href={createdCreds.stripeOnboardingUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="body-text"
+                  style={{
+                    wordBreak: 'break-all',
+                    color: 'var(--color-primary, #FF69B4)',
+                  }}
+                >
+                  {createdCreds.stripeOnboardingUrl}
+                </a>
+                <div className="flex gap-2" style={{ marginTop: 'var(--space-2)' }}>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(createdCreds.stripeOnboardingUrl);
+                      addToast('success', 'Onboarding link copied');
+                    }}
+                  >
+                    Copy onboarding link
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </Modal>
 
         {/* ── Balance Adjustment Modal ───────────────── */}

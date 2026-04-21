@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { Auth0Provider } from '@auth0/auth0-react';
+import { Auth0Provider, type AppState } from '@auth0/auth0-react';
 import { AuthProvider } from './contexts/AuthContext';
+import { WebSocketProvider } from './contexts/WebSocketContext';
 import { ToastProvider } from './components/ToastProvider';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { CosmicBackground } from './components/CosmicBackground';
@@ -66,14 +67,16 @@ export default function App() {
         redirect_uri: import.meta.env.VITE_AUTH0_REDIRECT_URI || window.location.origin,
         audience: import.meta.env.VITE_AUTH0_AUDIENCE || '',
       }}
-      onRedirectCallback={(appState) => {
+      onRedirectCallback={(appState?: AppState) => {
         window.history.replaceState({}, '', appState?.returnTo || '/dashboard');
       }}
     >
       <BrowserRouter>
         <ToastProvider>
           <AuthProvider>
-            <AppRoutes />
+            <WebSocketProvider>
+              <AppRoutes />
+            </WebSocketProvider>
           </AuthProvider>
         </ToastProvider>
       </BrowserRouter>

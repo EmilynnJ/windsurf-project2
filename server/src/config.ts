@@ -8,10 +8,20 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   AUTH0_DOMAIN: z.string().min(1),
   AUTH0_AUDIENCE: z.string().min(1),
+  // Optional: Auth0 Management API credentials for creating reader accounts.
+  // Create a Machine-to-Machine app in Auth0 authorized for the Management API
+  // with scopes: create:users, read:users, update:users.
+  AUTH0_MGMT_CLIENT_ID: z.string().default(''),
+  AUTH0_MGMT_CLIENT_SECRET: z.string().default(''),
+  AUTH0_DB_CONNECTION: z.string().default('Username-Password-Authentication'),
   AGORA_APP_ID: z.string().default(''),
   AGORA_APP_CERTIFICATE: z.string().default(''),
   STRIPE_SECRET_KEY: z.string().default(''),
   STRIPE_WEBHOOK_SECRET: z.string().default(''),
+  // Optional: Cloudinary credentials for reader profile image uploads.
+  CLOUDINARY_CLOUD_NAME: z.string().default(''),
+  CLOUDINARY_API_KEY: z.string().default(''),
+  CLOUDINARY_API_SECRET: z.string().default(''),
   ADMIN_EMAILS: z.string().default('emilynnj14@gmail.com'),
 });
 
@@ -48,6 +58,20 @@ export const config = {
   stripe: {
     secretKey: env.STRIPE_SECRET_KEY,
     webhookSecret: env.STRIPE_WEBHOOK_SECRET,
+  },
+  auth0Management: {
+    clientId: env.AUTH0_MGMT_CLIENT_ID,
+    clientSecret: env.AUTH0_MGMT_CLIENT_SECRET,
+    dbConnection: env.AUTH0_DB_CONNECTION,
+    enabled: Boolean(env.AUTH0_MGMT_CLIENT_ID && env.AUTH0_MGMT_CLIENT_SECRET),
+  },
+  cloudinary: {
+    cloudName: env.CLOUDINARY_CLOUD_NAME,
+    apiKey: env.CLOUDINARY_API_KEY,
+    apiSecret: env.CLOUDINARY_API_SECRET,
+    enabled: Boolean(
+      env.CLOUDINARY_CLOUD_NAME && env.CLOUDINARY_API_KEY && env.CLOUDINARY_API_SECRET,
+    ),
   },
   adminEmails: env.ADMIN_EMAILS.split(',').map((e) => e.trim().toLowerCase()),
 } as const;

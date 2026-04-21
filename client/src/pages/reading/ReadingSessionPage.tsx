@@ -1,7 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../../components/ToastProvider';
+import { useWebSocketEvent } from '../../hooks/useWebSocket';
+import { useReadingHeartbeat } from '../../hooks/useReadingHeartbeat';
 import { apiService } from '../../services/api';
 import {
   Button,
@@ -596,6 +598,111 @@ export function ReadingSessionPage() {
     return () => clearInterval(timerRef.current);
   }, [reading, summary]);
 
+  /* ── Server-side heartbeat keeps this session out of the grace-period sweeper ── */
+  const isLive =
+    !!reading &&
+    !summary &&
+    reading.status !== 'completed' &&
+    reading.status !== 'cancelled';
+  useReadingHeartbeat(reading?.id ?? null, isLive);
+
+  /* ── WebSocket-pushed real-time events for this reading ───────── */
+  const readingIdNum = reading?.id ?? null;
+
+  const handleEndedPush = useCallback(
+    (payload: unknown) => {
+      const p = (payload ?? {}) as {
+        readingId?: number;
+        reason?: string;
+        duration?: number;
+        durationSeconds?: number;
+        totalCost?: number;
+        totalCharged?: number;
+        ratePerMinute?: number;
+      };
+      if (readingIdNum == null || p.readingId !== readingIdNum) return;
+
+      // If the HTTP /end handler (handleEndSession) already rendered the
+      // summary, don't overwrite it — unit conventions differ slightly and
+      // the HTTP response is authoritative for the initiating user.
+      if (summary) return;
+
+      if (timerRef.current) clearInterval(timerRef.current);
+
+      // Fall back to locally tracked values when the server payload is
+      // missing financial fields (e.g. auto-end triggered by the billing
+      // service's insufficient-balance / grace-period sweeper).
+      const totalCostCents = p.totalCost ?? p.totalCharged ?? Math.round(cost);
+      setSummary({
+        duration: p.durationSeconds ?? p.duration ?? elapsed,
+        totalCost: totalCostCents / 100,
+        ratePerMinute: (p.ratePerMinute ?? reading?.ratePerMinute ?? 0) / 100,
+      });
+
+      if (p.reason === 'insufficient_balance') {
+        addToast(
+          'warning',
+          'Your balance ran out. The session has ended — top up to start a new reading.',
+        );
+      } else if (p.reason === 'grace_period_expired') {
+        addToast(
+          'warning',
+          'The session ended because the other party did not reconnect in time.',
+        );
+      }
+    },
+    [readingIdNum, elapsed, cost, reading, summary, addToast],
+  );
+  useWebSocketEvent('reading:ended', handleEndedPush);
+
+  const handleInsufficientBalance = useCallback(
+    (payload: unknown) => {
+      const p = (payload ?? {}) as { readingId?: number; balance?: number };
+      if (readingIdNum == null || p.readingId !== readingIdNum) return;
+      addToast(
+        'error',
+        'Your balance is too low to continue. The session will end shortly.',
+      );
+    },
+    [readingIdNum, addToast],
+  );
+  useWebSocketEvent('reading:insufficient_balance', handleInsufficientBalance);
+
+  const handlePartnerDisconnect = useCallback(
+    (payload: unknown) => {
+      const p = (payload ?? {}) as { readingId?: number };
+      if (readingIdNum == null || p.readingId !== readingIdNum) return;
+      setConnectionState('reconnecting');
+      addToast(
+        'warning',
+        'The other party disconnected. Waiting up to 2 minutes for them to return…',
+      );
+    },
+    [readingIdNum, addToast],
+  );
+  useWebSocketEvent('reading:partner_disconnected', handlePartnerDisconnect);
+
+  const handlePartnerReconnect = useCallback(
+    (payload: unknown) => {
+      const p = (payload ?? {}) as { readingId?: number };
+      if (readingIdNum == null || p.readingId !== readingIdNum) return;
+      setConnectionState('connected');
+      addToast('success', 'The other party is back online.');
+    },
+    [readingIdNum, addToast],
+  );
+  useWebSocketEvent('reading:partner_reconnected', handlePartnerReconnect);
+
+  /* Low-balance client-side warning when < 2 minutes of runway remains */
+  const lowBalanceWarning = useMemo(() => {
+    if (!user || !reading || summary) return null;
+    if (reading.ratePerMinute <= 0) return null;
+    const remainingCents = Math.max(0, user.balance - Math.round(cost));
+    const minutesLeft = remainingCents / reading.ratePerMinute;
+    if (minutesLeft < 2) return { minutesLeft, remainingCents };
+    return null;
+  }, [user, reading, cost, summary]);
+
   /* ── Send chat message ── */
   const handleSendMessage = useCallback(
     async (text: string) => {
@@ -650,10 +757,12 @@ export function ReadingSessionPage() {
       }>(`/api/readings/${reading.id}/end`);
 
       clearInterval(timerRef.current);
+      // Server returns financial fields in cents; convert to dollars for
+      // PostSessionSummary (which uses formatCost that expects dollars).
       setSummary({
         duration: result.duration,
-        totalCost: result.totalCost,
-        ratePerMinute: result.ratePerMinute,
+        totalCost: result.totalCost / 100,
+        ratePerMinute: result.ratePerMinute / 100,
       });
       setShowEndConfirm(false);
     } catch {
@@ -747,20 +856,38 @@ export function ReadingSessionPage() {
           />
         </section>
 
-        {/* ── Reconnection UI ── */}
-        {connectionState === 'disconnected' && (
-          <div className="card card--glow-pink text-center">
-            <div className="flex flex-col gap-3 items-center">
-              <span className="empty-state__icon">⚠️</span>
+        {/* ── Low-balance warning (< 2 min of runway) ── */}
+        {lowBalanceWarning && (
+          <div className="card card--glow-gold text-center" role="alert">
+            <div className="flex flex-col gap-2 items-center">
+              <span className="empty-state__icon" aria-hidden="true">⚠️</span>
               <p className="body-text">
-                Connection lost. The session timer has paused.
+                Only{' '}
+                <strong>
+                  {Math.max(0, lowBalanceWarning.minutesLeft).toFixed(1)} min
+                </strong>{' '}
+                of balance remaining. Your session will end automatically when
+                your balance runs out.
               </p>
-              <Button
-                variant="primary"
-                onClick={() => window.location.reload()}
-              >
-                Reconnect
-              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Reconnecting / Disconnected UI ── */}
+        {(connectionState === 'reconnecting' || connectionState === 'disconnected') && (
+          <div className="card card--glow-pink text-center" role="status">
+            <div className="flex flex-col gap-3 items-center">
+              <span className="empty-state__icon" aria-hidden="true">⚠️</span>
+              <p className="body-text">
+                {connectionState === 'reconnecting'
+                  ? 'The other party disconnected. Holding the session for up to 2 minutes…'
+                  : 'Connection lost. The session timer has paused.'}
+              </p>
+              {connectionState === 'disconnected' && (
+                <Button variant="primary" onClick={() => window.location.reload()}>
+                  Reconnect
+                </Button>
+              )}
             </div>
           </div>
         )}
