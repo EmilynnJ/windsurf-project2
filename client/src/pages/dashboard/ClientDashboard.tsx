@@ -3,12 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../../components/ToastProvider';
 import { apiService } from '../../services/api';
+import { AddFundsForm } from '../../components/AddFundsForm';
 import {
   Button,
   Card,
   CardBody,
   Modal,
-  Input,
   Stat,
   Table,
   LoadingPage,
@@ -16,10 +16,6 @@ import {
 } from '../../components/ui';
 import type { Column } from '../../components/ui';
 import type { Reading, Transaction } from '../../types';
-
-/* ── Constants ──────────────────────────────────────────────── */
-const PRESET_AMOUNTS = [10, 25, 50, 100]; // dollars
-const MIN_AMOUNT = 5;
 
 /* ── Helpers ────────────────────────────────────────────────── */
 function formatDate(iso: string): string {
@@ -137,9 +133,6 @@ export function ClientDashboard() {
 
   // Add Funds Modal
   const [showAddFunds, setShowAddFunds] = useState(false);
-  const [selectedAmount, setSelectedAmount] = useState<number | null>(25);
-  const [customAmount, setCustomAmount] = useState('');
-  const [addingFunds, setAddingFunds] = useState(false);
 
   /* ── Load data ── */
   useEffect(() => {
@@ -160,32 +153,27 @@ export function ClientDashboard() {
     load();
   }, [addToast]);
 
-  /* ── Add Funds ── */
-  const handleAddFunds = useCallback(async () => {
-    const amountDollars = selectedAmount || parseFloat(customAmount);
-    if (!amountDollars || amountDollars < MIN_AMOUNT) {
-      addToast('error', `Minimum deposit is $${MIN_AMOUNT}.00`);
-      return;
-    }
-
-    setAddingFunds(true);
-    try {
-      const amountCents = Math.round(amountDollars * 100);
-      await apiService.post('/api/payments/create-payment-intent', { amount: amountCents });
-      addToast('success', `$${amountDollars.toFixed(2)} added to your balance! ✨`);
+  /* ── Add Funds success ── */
+  const handleAddFundsSuccess = useCallback(
+    async (amountCents: number) => {
+      addToast(
+        'success',
+        `$${(amountCents / 100).toFixed(2)} top-up received! Your balance will update momentarily. ✨`,
+      );
       setShowAddFunds(false);
-      setSelectedAmount(25);
-      setCustomAmount('');
-      if (refreshUser) refreshUser();
-      // Refresh transactions
-      const txData = await apiService.get<Transaction[]>('/api/payments/transactions');
-      setTransactions(txData);
-    } catch {
-      addToast('error', 'Failed to add funds. Please try again.');
-    } finally {
-      setAddingFunds(false);
-    }
-  }, [selectedAmount, customAmount, addToast, refreshUser]);
+      // Give the Stripe webhook a moment to credit the balance, then refresh.
+      setTimeout(async () => {
+        if (refreshUser) refreshUser();
+        try {
+          const txData = await apiService.get<Transaction[]>('/api/payments/transactions');
+          setTransactions(txData);
+        } catch {
+          /* ignore -- transactions are best-effort here */
+        }
+      }, 1_500);
+    },
+    [addToast, refreshUser],
+  );
 
   if (!user) return <LoadingPage message="Loading dashboard..." />;
 
@@ -297,50 +285,13 @@ export function ClientDashboard() {
           open={showAddFunds}
           onClose={() => setShowAddFunds(false)}
           title="Add Funds"
-          footer={
-            <>
-              <Button variant="ghost" onClick={() => setShowAddFunds(false)}>
-                Cancel
-              </Button>
-              <Button
-                variant="gold"
-                onClick={handleAddFunds}
-                loading={addingFunds}
-              >
-                Add ${(selectedAmount || parseFloat(customAmount) || 0).toFixed(2)}
-              </Button>
-            </>
-          }
         >
-          <div className="flex flex-col gap-5">
-            <p className="body-text">Select an amount or enter a custom value:</p>
-            <div className="amount-presets">
-              {PRESET_AMOUNTS.map((amt) => (
-                <button
-                  key={amt}
-                  className={`amount-preset ${selectedAmount === amt ? 'amount-preset--selected' : ''}`}
-                  onClick={() => {
-                    setSelectedAmount(amt);
-                    setCustomAmount('');
-                  }}
-                  aria-pressed={selectedAmount === amt}
-                >
-                  ${amt}
-                </button>
-              ))}
-            </div>
-            <Input
-              label="Custom Amount"
-              type="number"
-              placeholder="Enter amount..."
-              value={customAmount}
-              onChange={(e) => {
-                setCustomAmount(e.target.value);
-                setSelectedAmount(null);
-              }}
-              help={`Minimum $${MIN_AMOUNT}.00`}
+          {showAddFunds && (
+            <AddFundsForm
+              onSuccess={handleAddFundsSuccess}
+              onCancel={() => setShowAddFunds(false)}
             />
-          </div>
+          )}
         </Modal>
       </div>
     </div>

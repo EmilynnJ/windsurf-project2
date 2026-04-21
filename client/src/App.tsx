@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Auth0Provider } from '@auth0/auth0-react';
 import { AuthProvider } from './contexts/AuthContext';
+import { WebSocketProvider } from './contexts/WebSocketContext';
 import { ToastProvider } from './components/ToastProvider';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { CosmicBackground } from './components/CosmicBackground';
@@ -70,7 +71,9 @@ export default function App() {
       <BrowserRouter>
         <ToastProvider>
           <AuthProvider>
-            <AppRoutes />
+            <WebSocketProvider>
+              <AppRoutes />
+            </WebSocketProvider>
           </AuthProvider>
         </ToastProvider>
       </BrowserRouter>

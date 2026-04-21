@@ -19,6 +19,7 @@
     "@neondatabase/serverless": "^0.10.4",
     "@soulseer/shared": "file:../shared",
     "agora-token": "^2.0.5",
+    "auth0": "^5.7.0",
     "cloudinary": "^2.5.1",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",

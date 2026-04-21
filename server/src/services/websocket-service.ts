@@ -1,8 +1,11 @@
 import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import * as jose from 'jose';
+import { eq } from 'drizzle-orm';
 import { config } from '../config';
 import { logger } from '../utils/logger';
+import { getDb } from '../db/db';
+import { users } from '../db/schema';
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
@@ -77,10 +80,22 @@ class WebSocketService {
         issuer: `https://${config.auth0.domain}/`,
         audience: config.auth0.audience,
       });
-      const userId = parseInt(
+
+      // Prefer a custom `userId` claim if configured in Auth0; otherwise resolve
+      // the internal user by `sub` (Auth0 user_id).
+      let userId = parseInt(
         (payload as any).userId ?? (payload as any)['https://soulseer.com/userId'] ?? '0',
         10,
       );
+      if (!userId && payload.sub) {
+        const db = getDb();
+        const [user] = await db
+          .select({ id: users.id })
+          .from(users)
+          .where(eq(users.auth0Id, payload.sub))
+          .limit(1);
+        if (user) userId = user.id;
+      }
       if (!userId) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
 
       this.wss!.handleUpgrade(request, socket, head, (ws) => {
