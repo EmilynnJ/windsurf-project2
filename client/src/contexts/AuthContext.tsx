@@ -61,7 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [auth0Loading, refreshUser]);
 
   const login = useCallback(() => {
-    loginWithRedirect();
+    loginWithRedirect({ appState: { returnTo: '/dashboard' } });
   }, [loginWithRedirect]);
 
   const logout = useCallback(() => {
