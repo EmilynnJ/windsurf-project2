@@ -688,7 +688,7 @@ export function ReadingSessionPage() {
   const lowBalanceWarning = useMemo(() => {
     if (!user || !reading || summary) return null;
     if (reading.ratePerMinute <= 0) return null;
-    const remainingCents = Math.max(0, user.balance - Math.round(cost * 100));
+    const remainingCents = Math.max(0, user.balance - Math.round(cost));
     const minutesLeft = remainingCents / reading.ratePerMinute;
     if (minutesLeft < 2) return { minutesLeft, remainingCents };
     return null;

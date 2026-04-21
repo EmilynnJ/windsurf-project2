@@ -181,8 +181,13 @@ export function AdminDashboard() {
         bio: editForm.bio,
         specialties: editForm.specialties,
       };
-      // Only send profileImage if it changed (omit to avoid URL-max validation on empty strings)
-      if (editForm.profileImage) payload.profileImage = editForm.profileImage;
+      // Include profileImage when it changed. Empty string means "remove" → send null
+      // so the server clears the field; truthy means "update" → send the new URL.
+      const original = editUser.profileImage || '';
+      const current = editForm.profileImage || '';
+      if (current !== original) {
+        payload.profileImage = current ? current : null;
+      }
       await apiService.patch(`/api/admin/readers/${editUser.id}`, payload);
       setUsers((prev) =>
         prev.map((u) => (u.id === editUser.id ? { ...u, ...editForm } : u)),

@@ -288,7 +288,7 @@ const editReaderSchema = z.object({
   username: z.string().min(3).max(50).optional(),
   bio: z.string().max(2000).optional(),
   specialties: z.string().max(500).optional(),
-  profileImage: z.string().url().max(512).optional(),
+  profileImage: z.string().url().max(512).nullable().optional(),
   pricingChat: z.number().int().min(0).max(100_000).optional(),
   pricingVoice: z.number().int().min(0).max(100_000).optional(),
   pricingVideo: z.number().int().min(0).max(100_000).optional(),
