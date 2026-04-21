@@ -139,7 +139,7 @@ export function ClientDashboard() {
     async function load() {
       try {
         const [readingData, txData] = await Promise.all([
-          apiService.get<Reading[]>('/api/readings/my'),
+          apiService.get<Reading[]>('/api/readings/client'),
           apiService.get<Transaction[]>('/api/payments/transactions'),
         ]);
         setReadings(readingData);

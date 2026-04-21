@@ -22,6 +22,7 @@ const envSchema = z.object({
   CLOUDINARY_CLOUD_NAME: z.string().default(''),
   CLOUDINARY_API_KEY: z.string().default(''),
   CLOUDINARY_API_SECRET: z.string().default(''),
+  ADMIN_EMAILS: z.string().default('emilynnj14@gmail.com'),
 });
 
 function loadConfig() {
@@ -72,4 +73,5 @@ export const config = {
       env.CLOUDINARY_CLOUD_NAME && env.CLOUDINARY_API_KEY && env.CLOUDINARY_API_SECRET,
     ),
   },
+  adminEmails: env.ADMIN_EMAILS.split(',').map((e) => e.trim().toLowerCase()),
 } as const;

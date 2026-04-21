@@ -110,7 +110,7 @@ function PostCard({
 
   const handleFlagComment = async (commentId: number) => {
     try {
-      await apiService.post('/api/forum/flag', { commentId, reason: 'Flagged by user' });
+      await apiService.post('/api/forum/flags', { commentId, reason: 'Flagged by user' });
       addToast('info', 'Comment flagged for review');
     } catch {
       addToast('error', 'Failed to flag comment');
@@ -326,7 +326,7 @@ export function CommunityHubPage() {
   /* ── Flag / Delete handlers ── */
   const handleFlag = async (postId: number) => {
     try {
-      await apiService.post('/api/forum/flag', { postId, reason: 'Flagged by user' });
+      await apiService.post('/api/forum/flags', { postId, reason: 'Flagged by user' });
       addToast('info', 'Post flagged for review');
     } catch {
       addToast('error', 'Failed to flag post');
