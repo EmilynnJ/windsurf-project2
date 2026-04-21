@@ -94,12 +94,18 @@ export const users = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+
+    // Soft-delete timestamp (set by DELETE /api/me). When non-null the row is
+    // retained for FK integrity on historical readings/transactions but PII is
+    // scrubbed and the user is excluded from public listings.
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (table) => ({
     auth0IdIdx: uniqueIndex("users_auth0_id_idx").on(table.auth0Id),
     emailIdx: uniqueIndex("users_email_idx").on(table.email),
     roleIdx: index("users_role_idx").on(table.role),
     isOnlineIdx: index("users_is_online_idx").on(table.isOnline),
+    deletedAtIdx: index("users_deleted_at_idx").on(table.deletedAt),
   }),
 );
 
@@ -362,3 +368,17 @@ export const forumFlagsRelations = relations(forumFlags, ({ one }) => ({
     references: [users.id],
   }),
 }));
+
+// ─── Newsletter Subscribers ─────────────────────────────────────────────────
+export const newsletterSubscribers = pgTable(
+  "newsletter_subscribers",
+  {
+    id: serial("id").primaryKey(),
+    email: varchar("email", { length: 255 }).notNull(),
+    unsubscribedAt: timestamp("unsubscribed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    emailIdx: uniqueIndex("newsletter_subscribers_email_idx").on(table.email),
+  }),
+);

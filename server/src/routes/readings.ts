@@ -121,6 +121,81 @@ router.post(
   },
 );
 
+// ─── GET /api/readings/reader/pending — Reader's pending incoming requests ──
+router.get("/reader/pending", requireAuth, async (req, res, next) => {
+  try {
+    const db = getDb();
+    if (req.user!.role !== "reader" && req.user!.role !== "admin") {
+      res.status(403).json({ error: "Reader access required" });
+      return;
+    }
+    const result = await db
+      .select({
+        id: readings.id,
+        clientId: readings.clientId,
+        readingType: readings.readingType,
+        ratePerMinute: readings.ratePerMinute,
+        status: readings.status,
+        createdAt: readings.createdAt,
+        clientName: users.fullName,
+        clientUsername: users.username,
+        clientAvatar: users.profileImage,
+      })
+      .from(readings)
+      .innerJoin(users, eq(readings.clientId, users.id))
+      .where(and(eq(readings.readerId, req.user!.id), eq(readings.status, "pending")))
+      .orderBy(desc(readings.createdAt));
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── POST /api/readings/:id/decline — Reader declines request ───────────────
+router.post("/:id/decline", requireAuth, async (req, res, next) => {
+  try {
+    const db = getDb();
+    const readingId = parseInt(req.params.id!, 10);
+
+    if (isNaN(readingId)) {
+      res.status(400).json({ error: "Invalid reading ID" });
+      return;
+    }
+
+    const [reading] = await db
+      .select()
+      .from(readings)
+      .where(
+        and(
+          eq(readings.id, readingId),
+          eq(readings.readerId, req.user!.id),
+          eq(readings.status, "pending"),
+        ),
+      );
+
+    if (!reading) {
+      res.status(404).json({ error: "Reading not found or not pending" });
+      return;
+    }
+
+    const now = new Date();
+    await db
+      .update(readings)
+      .set({ status: "cancelled", updatedAt: now })
+      .where(eq(readings.id, readingId));
+
+    wsService.send(reading.clientId, "reading:cancelled", {
+      readingId,
+      reason: "reader_declined",
+    });
+
+    logger.info({ readingId }, "Reading declined by reader");
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ─── POST /api/readings/:id/accept — Reader accepts request ─────────────────
 router.post("/:id/accept", requireAuth, async (req, res, next) => {
   try {

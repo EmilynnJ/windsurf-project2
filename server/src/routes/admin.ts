@@ -373,6 +373,15 @@ router.patch("/users/:id/role", async (req, res, next) => {
       return;
     }
 
+    // Prevent admins from demoting themselves. A single admin account changing
+    // its own role to client/reader could lock the platform out of admin access.
+    if (userId === req.user!.id && role !== "admin") {
+      res.status(403).json({
+        error: "You cannot demote your own admin account. Ask another admin to change your role.",
+      });
+      return;
+    }
+
     const [u] = await db
       .update(users)
       .set({ role, updatedAt: new Date() })

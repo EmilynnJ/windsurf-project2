@@ -20,6 +20,16 @@ import {
 import type { Column } from '../../components/ui';
 import type { User, Reading, Transaction, ForumPost } from '../../types';
 
+interface ForumFlag {
+  id: number;
+  postId: number | null;
+  commentId: number | null;
+  reporterId: number;
+  reason: string;
+  resolved: boolean;
+  createdAt: string;
+}
+
 /* ── Helpers ────────────────────────────────────────────────── */
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', {
@@ -55,6 +65,7 @@ export function AdminDashboard() {
   const [readings, setReadings] = useState<Reading[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [forumPosts, setForumPosts] = useState<ForumPost[]>([]);
+  const [flags, setFlags] = useState<ForumFlag[]>([]);
   const [loading, setLoading] = useState(true);
 
   // ── Search state ──
@@ -96,16 +107,18 @@ export function AdminDashboard() {
   useEffect(() => {
     async function loadAll() {
       try {
-        const [u, r, t, p] = await Promise.all([
+        const [u, r, t, p, f] = await Promise.all([
           apiService.get<User[]>('/api/admin/users'),
           apiService.get<Reading[]>('/api/admin/readings'),
           apiService.get<Transaction[]>('/api/admin/transactions'),
           apiService.get<ForumPost[]>('/api/admin/forum/posts').catch(() => []),
+          apiService.get<ForumFlag[]>('/api/admin/forum/flagged').catch(() => []),
         ]);
         setUsers(u);
         setReadings(r);
         setTransactions(t);
         setForumPosts(p);
+        setFlags(f);
       } catch {
         addToast('error', 'Failed to load admin data');
       } finally {
@@ -246,6 +259,61 @@ export function AdminDashboard() {
     }
   }, [addToast]);
 
+  const handleTogglePostLock = useCallback(
+    async (postId: number, isLocked: boolean) => {
+      try {
+        await apiService.patch(`/api/admin/posts/${postId}/lock`, { isLocked });
+        setForumPosts((prev) =>
+          prev.map((p) => (p.id === postId ? { ...p, isLocked } : p)),
+        );
+        addToast('success', isLocked ? 'Post locked' : 'Post unlocked');
+      } catch {
+        addToast('error', 'Failed to update post');
+      }
+    },
+    [addToast],
+  );
+
+  const handleResolveFlag = useCallback(
+    async (flagId: number) => {
+      try {
+        await apiService.patch(`/api/admin/flags/${flagId}/resolve`);
+        setFlags((prev) => prev.filter((f) => f.id !== flagId));
+        addToast('success', 'Flag resolved');
+      } catch {
+        addToast('error', 'Failed to resolve flag');
+      }
+    },
+    [addToast],
+  );
+
+  /* ── Refund ── */
+  const handleRefundReading = useCallback(
+    async (readingId: number) => {
+      const ok = window.confirm(
+        `Refund reading #${readingId}? The client will be credited the full charge.`,
+      );
+      if (!ok) return;
+      try {
+        await apiService.post(`/api/admin/readings/${readingId}/refund`);
+        setReadings((prev) =>
+          prev.map((r) => (r.id === readingId ? { ...r, paymentStatus: 'refunded' } : r)),
+        );
+        addToast('success', 'Reading refunded');
+        // Refresh transactions so the refund entry shows up.
+        try {
+          const t = await apiService.get<Transaction[]>('/api/admin/transactions');
+          setTransactions(t);
+        } catch {
+          /* best effort */
+        }
+      } catch (err) {
+        addToast('error', err instanceof Error ? err.message : 'Refund failed');
+      }
+    },
+    [addToast],
+  );
+
   /* ── Payout ── */
   const handlePayout = useCallback(async (userId: number) => {
     try {
@@ -345,6 +413,39 @@ export function AdminDashboard() {
       header: 'Revenue',
       sortable: true,
       render: (row) => <span className="price">${((row.totalCharged as number) / 100).toFixed(2)}</span>,
+    },
+    {
+      key: 'paymentStatus',
+      header: 'Payment',
+      render: (row) => {
+        const s = row.paymentStatus as string;
+        const variant = s === 'paid' ? 'gold' : s === 'refunded' ? 'pink' : 'info';
+        return <span className={`badge badge--${variant}`}>{s}</span>;
+      },
+    },
+    {
+      key: 'refund',
+      header: '',
+      render: (row) => {
+        const status = row.status as string;
+        const paymentStatus = row.paymentStatus as string;
+        const totalCharged = row.totalCharged as number;
+        const canRefund =
+          status === 'completed' && paymentStatus === 'paid' && totalCharged > 0;
+        if (!canRefund) return null;
+        return (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleRefundReading(row.id as number);
+            }}
+          >
+            Refund
+          </Button>
+        );
+      },
     },
   ];
 
@@ -577,40 +678,115 @@ export function AdminDashboard() {
 
           {/* ── Moderation Tab ── */}
           <TabPanel id="moderation" activeTab={activeTab}>
-            <div className="flex flex-col gap-4" style={{ paddingTop: 'var(--space-5)' }}>
-              <h3 className="heading-4">Forum Posts</h3>
-              {forumPosts.length === 0 ? (
-                <EmptyState
-                  icon="🛡️"
-                  title="No Posts to Moderate"
-                  description="Forum posts will appear here for moderation."
-                />
-              ) : (
-                forumPosts.map((post) => (
-                  <Card key={post.id} variant="static" padding="sm">
-                    <CardBody>
-                      <div className="flex justify-between items-start gap-4">
-                        <div className="flex flex-col gap-1 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="badge badge--gold">{post.category}</span>
-                            <span className="caption">{formatDate(post.createdAt)}</span>
+            <div className="flex flex-col gap-5" style={{ paddingTop: 'var(--space-5)' }}>
+              {/* ── Flagged Content Queue ── */}
+              <div className="flex flex-col gap-3">
+                <h3 className="heading-4">
+                  Flagged Content
+                  {flags.length > 0 && (
+                    <span className="badge badge--pink" style={{ marginLeft: 'var(--space-2)' }}>
+                      {flags.length}
+                    </span>
+                  )}
+                </h3>
+                {flags.length === 0 ? (
+                  <EmptyState
+                    icon="🚩"
+                    title="No open flags"
+                    description="Community flags will appear here for review."
+                  />
+                ) : (
+                  flags.map((f) => (
+                    <Card key={f.id} variant="static" padding="sm">
+                      <CardBody>
+                        <div className="flex justify-between items-start gap-4">
+                          <div className="flex flex-col gap-1 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="badge badge--pink">
+                                {f.postId ? `Post #${f.postId}` : f.commentId ? `Comment #${f.commentId}` : 'Unknown'}
+                              </span>
+                              <span className="caption">{formatDate(f.createdAt)}</span>
+                            </div>
+                            <p className="body-text">
+                              <strong>Reason:</strong> {f.reason || '—'}
+                            </p>
+                            <p className="caption">Reported by user #{f.reporterId}</p>
                           </div>
-                          <h4 className="forum-post__title">{post.title}</h4>
-                          <p className="forum-post__body">{post.content.slice(0, 200)}…</p>
-                          <p className="caption">By {post.userName || `User #${post.userId}`} · {post.commentCount} comments</p>
+                          <div className="flex gap-2">
+                            {f.postId != null && (
+                              <Button
+                                variant="danger"
+                                size="sm"
+                                onClick={() => handleDeletePost(f.postId!)}
+                              >
+                                Delete post
+                              </Button>
+                            )}
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              onClick={() => handleResolveFlag(f.id)}
+                            >
+                              Resolve
+                            </Button>
+                          </div>
                         </div>
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          onClick={() => handleDeletePost(post.id)}
-                        >
-                          Delete
-                        </Button>
-                      </div>
-                    </CardBody>
-                  </Card>
-                ))
-              )}
+                      </CardBody>
+                    </Card>
+                  ))
+                )}
+              </div>
+
+              {/* ── All Forum Posts ── */}
+              <div className="flex flex-col gap-3">
+                <h3 className="heading-4">Forum Posts</h3>
+                {forumPosts.length === 0 ? (
+                  <EmptyState
+                    icon="🛡️"
+                    title="No Posts to Moderate"
+                    description="Forum posts will appear here for moderation."
+                  />
+                ) : (
+                  forumPosts.map((post) => (
+                    <Card key={post.id} variant="static" padding="sm">
+                      <CardBody>
+                        <div className="flex justify-between items-start gap-4">
+                          <div className="flex flex-col gap-1 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="badge badge--gold">{post.category}</span>
+                              <span className="caption">{formatDate(post.createdAt)}</span>
+                              {post.isLocked && (
+                                <span className="badge badge--info">🔒 Locked</span>
+                              )}
+                            </div>
+                            <h4 className="forum-post__title">{post.title}</h4>
+                            <p className="forum-post__body">{post.content.slice(0, 200)}…</p>
+                            <p className="caption">
+                              By {post.userName || `User #${post.userId}`} · {post.commentCount} comments
+                            </p>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => handleTogglePostLock(post.id, !post.isLocked)}
+                            >
+                              {post.isLocked ? 'Unlock' : 'Lock'}
+                            </Button>
+                            <Button
+                              variant="danger"
+                              size="sm"
+                              onClick={() => handleDeletePost(post.id)}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        </div>
+                      </CardBody>
+                    </Card>
+                  ))
+                )}
+              </div>
             </div>
           </TabPanel>
 
