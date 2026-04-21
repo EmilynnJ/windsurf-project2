@@ -1,10 +1,12 @@
 import { Router } from "express";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, inArray, isNull, or } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db/db";
 import { users, readings } from "../db/schema";
 import { requireAuth } from "../middleware/auth";
 import { validateBody } from "../middleware/validate";
+import { auth0ManagementService } from "../services/auth0-management";
+import { logger } from "../utils/logger";
 
 const router = Router();
 
@@ -27,7 +29,7 @@ router.get("/readers", async (_req, res, next) => {
         totalReadings: users.totalReadings,
       })
       .from(users)
-      .where(eq(users.role, "reader"))
+      .where(and(eq(users.role, "reader"), isNull(users.deletedAt)))
       .orderBy(desc(users.isOnline));
 
     res.json(result);
@@ -55,7 +57,7 @@ router.get("/readers/online", async (_req, res, next) => {
         totalReadings: users.totalReadings,
       })
       .from(users)
-      .where(and(eq(users.role, "reader"), eq(users.isOnline, true)));
+      .where(and(eq(users.role, "reader"), eq(users.isOnline, true), isNull(users.deletedAt)));
 
     res.json(result);
   } catch (err) {
@@ -90,7 +92,7 @@ router.get("/readers/:id", async (req, res, next) => {
         createdAt: users.createdAt,
       })
       .from(users)
-      .where(and(eq(users.id, readerId), eq(users.role, "reader")));
+      .where(and(eq(users.id, readerId), eq(users.role, "reader"), isNull(users.deletedAt)));
 
     if (!reader) {
       res.status(404).json({ error: "Reader not found" });
@@ -214,6 +216,15 @@ router.patch("/readers/status", requireAuth, async (req, res, next) => {
       .set({ isOnline, updatedAt: new Date() })
       .where(eq(users.id, req.user!.id))
       .returning({ isOnline: users.isOnline });
+
+    // If the reader has just gone offline, notify any partners on active/pending
+    // readings and mark accepted/in-progress sessions as paused so billing
+    // stops. The client can then end the session cleanly.
+    if (!isOnline) {
+      const { billingService } = await import("../services/billing-service");
+      await billingService.handleReaderOffline(req.user!.id);
+    }
+
     res.json({ isOnline: u!.isOnline });
   } catch (err) {
     next(err);
@@ -307,6 +318,81 @@ router.patch(
   },
 );
 
+// ─── DELETE /api/me — Delete own account ────────────────────────────────────
+// Soft-deletes the user by setting deletedAt, scrubbing PII, forcing offline,
+// and clearing Stripe/Auth0 references. Historical readings/transactions are
+// retained for compliance and accounting.
+router.delete("/me", requireAuth, async (req, res, next) => {
+  try {
+    const db = getDb();
+    const userId = req.user!.id;
+
+    // Block deletion if the user has an active reading in progress.
+    const active = await db
+      .select({ id: readings.id })
+      .from(readings)
+      .where(
+        and(
+          or(eq(readings.clientId, userId), eq(readings.readerId, userId)),
+          inArray(readings.status, ["pending", "accepted", "in_progress", "active", "paused"] as const),
+        ),
+      )
+      .limit(1);
+
+    if (active.length > 0) {
+      res.status(409).json({
+        error: "You have an active reading. End it before deleting your account.",
+      });
+      return;
+    }
+
+    // Admins cannot self-delete — prevents locking platform out of admin access.
+    if (req.user!.role === "admin") {
+      res.status(403).json({
+        error: "Admins cannot delete their own account. Ask another admin.",
+      });
+      return;
+    }
+
+    // Try to delete the Auth0 user first (best effort). If it fails we still
+    // want to scrub local data so the user is effectively logged out.
+    const auth0Id = req.user!.auth0Id;
+    let auth0Deleted = false;
+    try {
+      auth0Deleted = await auth0ManagementService.deleteUser(auth0Id);
+    } catch (err) {
+      logger.error({ err, userId }, "Auth0 deletion failed during account delete — continuing with local scrub");
+    }
+
+    const now = new Date();
+    const scrubbedEmail = `deleted-${userId}-${now.getTime()}@deleted.soulseer.invalid`;
+    const scrubbedAuth0Id = `deleted|${userId}|${now.getTime()}`;
+
+    await db
+      .update(users)
+      .set({
+        email: scrubbedEmail,
+        auth0Id: scrubbedAuth0Id,
+        username: null,
+        fullName: "Deleted User",
+        profileImage: null,
+        bio: null,
+        specialties: null,
+        isOnline: false,
+        stripeAccountId: null,
+        stripeCustomerId: null,
+        deletedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(users.id, userId));
+
+    logger.info({ userId, auth0Deleted }, "Account deleted");
+    res.json({ ok: true, auth0Deleted });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ─── Backward compatible routes ─────────────────────────────────────────────
 router.patch("/me/online", requireAuth, async (req, res, next) => {
   try {
@@ -321,6 +407,12 @@ router.patch("/me/online", requireAuth, async (req, res, next) => {
       .set({ isOnline, updatedAt: new Date() })
       .where(eq(users.id, req.user!.id))
       .returning({ isOnline: users.isOnline });
+
+    if (!isOnline) {
+      const { billingService } = await import("../services/billing-service");
+      await billingService.handleReaderOffline(req.user!.id);
+    }
+
     res.json({ isOnline: u!.isOnline });
   } catch (err) {
     next(err);

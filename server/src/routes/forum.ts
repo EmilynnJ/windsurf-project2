@@ -67,7 +67,19 @@ router.get("/posts/:id", async (req, res, next) => {
 });
 
 // ─── Create post ────────────────────────────────────────────────────────────
-const createPostSchema = z.object({ title: z.string().min(1).max(255), content: z.string().min(1).max(10000), category: z.string().max(100).default("General") });
+// Category whitelist — must match client/src/pages/community/CommunityHubPage.tsx
+export const FORUM_CATEGORIES = [
+  "General",
+  "Readings",
+  "Spiritual Growth",
+  "Ask a Reader",
+  "Announcements",
+] as const;
+const createPostSchema = z.object({
+  title: z.string().min(1).max(255),
+  content: z.string().min(1).max(10000),
+  category: z.enum(FORUM_CATEGORIES).default("General"),
+});
 
 router.post("/posts", requireAuth, validateBody(createPostSchema), async (req, res, next) => {
   try {

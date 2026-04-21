@@ -1,4 +1,4 @@
-import { eq, and, lt, sql } from "drizzle-orm";
+import { eq, and, lt, sql, inArray } from "drizzle-orm";
 import { getDb } from "../db/db";
 import { users, readings, transactions } from "../db/schema";
 import { wsService } from "./websocket-service";
@@ -235,6 +235,70 @@ class BillingService {
       },
       "Reading ended by billing service",
     );
+  }
+
+  /**
+   * Called when a reader toggles offline or their socket closes mid-session.
+   * Pauses all active/accepted/in_progress readings for that reader and
+   * notifies both participants. Billing ticks skip any non-active status so
+   * charging stops immediately. Clients can then choose to end the session
+   * or wait for the reader to come back online.
+   */
+  async handleReaderOffline(readerId: number): Promise<void> {
+    const db = getDb();
+    const now = new Date();
+
+    const sessions = await db
+      .select({ id: readings.id, clientId: readings.clientId, status: readings.status })
+      .from(readings)
+      .where(
+        and(
+          eq(readings.readerId, readerId),
+          inArray(readings.status, ["accepted", "in_progress", "active"] as const),
+        ),
+      );
+
+    if (sessions.length === 0) return;
+
+    await db
+      .update(readings)
+      .set({ status: "paused", updatedAt: now })
+      .where(
+        and(
+          eq(readings.readerId, readerId),
+          inArray(readings.status, ["accepted", "in_progress", "active"] as const),
+        ),
+      );
+
+    for (const s of sessions) {
+      wsService.broadcast(
+        [s.clientId, readerId],
+        "reading:partner_disconnected",
+        { readingId: s.id, partnerRole: "reader", previousStatus: s.status },
+      );
+      logger.info({ readingId: s.id, readerId }, "Reading paused: reader went offline");
+    }
+
+    // Also cancel any still-pending requests so the client UI clears them.
+    const pending = await db
+      .select({ id: readings.id, clientId: readings.clientId })
+      .from(readings)
+      .where(and(eq(readings.readerId, readerId), eq(readings.status, "pending")));
+
+    if (pending.length > 0) {
+      await db
+        .update(readings)
+        .set({ status: "cancelled", updatedAt: now })
+        .where(and(eq(readings.readerId, readerId), eq(readings.status, "pending")));
+
+      for (const p of pending) {
+        wsService.broadcast(
+          [p.clientId, readerId],
+          "reading:cancelled",
+          { readingId: p.id, reason: "reader_offline" },
+        );
+      }
+    }
   }
 }
 

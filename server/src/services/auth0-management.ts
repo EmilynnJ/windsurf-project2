@@ -113,6 +113,31 @@ class Auth0ManagementService {
       throw new Error(`Auth0 user creation failed: ${message}`);
     }
   }
+
+  /**
+   * Delete an Auth0 user. Idempotent — returns true if the user was deleted or
+   * did not exist, false if the service is disabled.
+   */
+  async deleteUser(auth0Id: string): Promise<boolean> {
+    if (!this.enabled) {
+      logger.warn({ auth0Id }, 'Auth0 deleteUser skipped — Management API not configured');
+      return false;
+    }
+    const client = this.getClient();
+    try {
+      await client.users.delete(auth0Id);
+      logger.info({ auth0Id }, 'Auth0 user deleted');
+      return true;
+    } catch (err) {
+      const status = (err as { statusCode?: number }).statusCode;
+      if (status === 404) {
+        // Already gone — treat as success.
+        return true;
+      }
+      logger.error({ err, status, auth0Id }, 'Auth0 user deletion failed');
+      throw new Error(`Auth0 user deletion failed: ${(err as Error).message}`);
+    }
+  }
 }
 
 export const auth0ManagementService = new Auth0ManagementService();

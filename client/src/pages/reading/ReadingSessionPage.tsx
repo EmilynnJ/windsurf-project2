@@ -84,17 +84,20 @@ function ConnectionStatus({ state }: { state: ConnectionState }) {
    ================================================================ */
 function SessionBar({
   elapsed,
-  cost,
-  balance,
-  rate,
+  costCents,
+  balanceCents,
+  rateCents,
 }: {
   elapsed: number;
-  cost: number;
-  balance: number;
-  rate: number;
+  /** Accrued cost in cents. */
+  costCents: number;
+  /** Current balance in cents. */
+  balanceCents: number;
+  /** Rate in cents-per-minute. */
+  rateCents: number;
 }) {
-  const remaining = balance - cost;
-  const minutesLeft = rate > 0 ? remaining / rate : Infinity;
+  const remainingCents = balanceCents - costCents;
+  const minutesLeft = rateCents > 0 ? remainingCents / rateCents : Infinity;
   const isLow = minutesLeft < 2 && minutesLeft > 0;
 
   return (
@@ -105,12 +108,14 @@ function SessionBar({
       </div>
       <div className="session-bar__item">
         <span className="session-bar__label">Cost</span>
-        <span className="session-bar__value session-bar__value--cost">{formatCost(cost)}</span>
+        <span className="session-bar__value session-bar__value--cost">
+          {formatCost(costCents / 100)}
+        </span>
       </div>
       <div className="session-bar__item">
         <span className="session-bar__label">Balance</span>
         <span className={`session-bar__value ${isLow ? 'session-bar__value--warning' : 'session-bar__value--balance'}`}>
-          {formatCost(remaining)}
+          {formatCost(Math.max(0, remainingCents) / 100)}
         </span>
       </div>
       {isLow && (
@@ -850,9 +855,9 @@ export function ReadingSessionPage() {
         <section className="section" style={{ paddingTop: 'var(--space-4)' }}>
           <SessionBar
             elapsed={elapsed}
-            cost={cost}
-            balance={user.accountBalance}
-            rate={reading.ratePerMinute}
+            costCents={cost}
+            balanceCents={user.accountBalance}
+            rateCents={reading.ratePerMinute}
           />
         </section>
 
@@ -928,7 +933,7 @@ export function ReadingSessionPage() {
           onClose={() => setShowEndConfirm(false)}
           onConfirm={handleEndSession}
           title="End Reading Session?"
-          message={`You've been in this ${readingTypeLabel.toLowerCase()} reading for ${formatTime(elapsed)}. Your total will be ${formatCost(cost)}. Are you sure you want to end the session?`}
+          message={`You've been in this ${readingTypeLabel.toLowerCase()} reading for ${formatTime(elapsed)}. Your total will be ${formatCost(cost / 100)}. Are you sure you want to end the session?`}
           confirmLabel="End Session"
           cancelLabel="Continue Reading"
           variant="danger"

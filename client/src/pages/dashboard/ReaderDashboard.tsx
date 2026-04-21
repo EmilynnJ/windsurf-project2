@@ -1,8 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../../components/ToastProvider';
+import { useWebSocketEvent } from '../../hooks/useWebSocket';
 import { apiService } from '../../services/api';
+import { ChatTranscriptModal } from '../../components/ChatTranscriptModal';
 import {
+  Avatar,
+  Badge,
   Button,
   Card,
   CardBody,
@@ -15,6 +20,18 @@ import {
 } from '../../components/ui';
 import type { Column } from '../../components/ui';
 import type { Reading, Review } from '../../types';
+
+interface PendingRequest {
+  id: number;
+  clientId: number;
+  readingType: 'chat' | 'voice' | 'video';
+  ratePerMinute: number;
+  status: string;
+  createdAt: string;
+  clientName: string | null;
+  clientUsername: string | null;
+  clientAvatar: string | null;
+}
 
 /* ── Helpers ────────────────────────────────────────────────── */
 function formatDate(iso: string): string {
@@ -36,57 +53,83 @@ function centsToDisplay(cents: number): string {
 }
 
 /* ── Column Defs ────────────────────────────────────────────── */
-const sessionColumns: Column<Reading & Record<string, unknown>>[] = [
-  {
-    key: 'createdAt',
-    header: 'Date',
-    sortable: true,
-    render: (row) => formatDate(row.createdAt as string),
-  },
-  {
-    key: 'readingType',
-    header: 'Type',
-    render: (row) => {
-      const icons: Record<string, string> = { chat: '💬', voice: '🎙️', video: '📹' };
-      const t = row.readingType as string;
-      return `${icons[t] || ''} ${t.charAt(0).toUpperCase() + t.slice(1)}`;
+function buildSessionColumns(
+  onViewTranscript: (readingId: number) => void,
+): Column<Reading & Record<string, unknown>>[] {
+  return [
+    {
+      key: 'createdAt',
+      header: 'Date',
+      sortable: true,
+      render: (row) => formatDate(row.createdAt as string),
     },
-  },
-  {
-    key: 'clientName',
-    header: 'Client',
-    render: (row) => (row.clientName as string) || `Client #${row.clientId}`,
-  },
-  {
-    key: 'durationSeconds',
-    header: 'Duration',
-    render: (row) => formatDuration(row.durationSeconds as number),
-  },
-  {
-    key: 'readerEarned',
-    header: 'Earned',
-    sortable: true,
-    render: (row) => (
-      <span className="price price--positive">
-        +{centsToDisplay(row.readerEarned as number)}
-      </span>
-    ),
-  },
-  {
-    key: 'status',
-    header: 'Status',
-    render: (row) => (
-      <span className={`badge badge--${row.status === 'completed' ? 'gold' : 'info'}`}>
-        {(row.status as string).charAt(0).toUpperCase() + (row.status as string).slice(1)}
-      </span>
-    ),
-  },
-];
+    {
+      key: 'readingType',
+      header: 'Type',
+      render: (row) => {
+        const icons: Record<string, string> = { chat: '💬', voice: '🎙️', video: '📹' };
+        const t = row.readingType as string;
+        return `${icons[t] || ''} ${t.charAt(0).toUpperCase() + t.slice(1)}`;
+      },
+    },
+    {
+      key: 'clientName',
+      header: 'Client',
+      render: (row) => (row.clientName as string) || `Client #${row.clientId}`,
+    },
+    {
+      key: 'durationSeconds',
+      header: 'Duration',
+      render: (row) => formatDuration(row.durationSeconds as number),
+    },
+    {
+      key: 'readerEarned',
+      header: 'Earned',
+      sortable: true,
+      render: (row) => (
+        <span className="price price--positive">
+          +{centsToDisplay(row.readerEarned as number)}
+        </span>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (row) => (
+        <span className={`badge badge--${row.status === 'completed' ? 'gold' : 'info'}`}>
+          {(row.status as string).charAt(0).toUpperCase() + (row.status as string).slice(1)}
+        </span>
+      ),
+    },
+    {
+      key: 'transcript',
+      header: '',
+      render: (row) => {
+        const type = row.readingType as string;
+        if (type !== 'chat') return null;
+        const id = row.id as number;
+        return (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              onViewTranscript(id);
+            }}
+          >
+            View transcript
+          </Button>
+        );
+      },
+    },
+  ];
+}
 
 /* ── Reader Dashboard ───────────────────────────────────────── */
 export function ReaderDashboard() {
   const { user, refreshUser } = useAuth();
   const { addToast } = useToast();
+  const navigate = useNavigate();
 
   const [isOnline, setIsOnline] = useState(user?.isOnline ?? false);
   const [toggling, setToggling] = useState(false);
@@ -100,9 +143,24 @@ export function ReaderDashboard() {
   // Data
   const [sessions, setSessions] = useState<Reading[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([]);
   const [loadingData, setLoadingData] = useState(true);
+  const [actingOnId, setActingOnId] = useState<number | null>(null);
+
+  // Chat transcript viewer
+  const [transcriptReadingId, setTranscriptReadingId] = useState<number | null>(null);
+  const sessionColumns = buildSessionColumns((id) => setTranscriptReadingId(id));
 
   /* ── Load data ── */
+  const loadPending = useCallback(async () => {
+    try {
+      const data = await apiService.get<PendingRequest[]>('/api/readings/reader/pending');
+      setPendingRequests(data);
+    } catch {
+      /* best effort */
+    }
+  }, []);
+
   useEffect(() => {
     async function load() {
       try {
@@ -112,6 +170,7 @@ export function ReaderDashboard() {
         ]);
         setSessions(sessionData);
         setReviews(readerData.reviews || []);
+        await loadPending();
       } catch {
         addToast('error', 'Failed to load dashboard data');
       } finally {
@@ -119,7 +178,55 @@ export function ReaderDashboard() {
       }
     }
     if (user) load();
-  }, [user, addToast]);
+  }, [user, addToast, loadPending]);
+
+  /* ── Real-time: new incoming request ── */
+  useWebSocketEvent<{ readingId: number; clientName?: string }>(
+    'reading:request',
+    useCallback(
+      (p) => {
+        addToast('info', `New reading request from ${p.clientName ?? 'a client'}`);
+        loadPending();
+      },
+      [addToast, loadPending],
+    ),
+  );
+
+  /* ── Accept request ── */
+  const handleAccept = useCallback(
+    async (readingId: number) => {
+      setActingOnId(readingId);
+      try {
+        await apiService.post(`/api/readings/${readingId}/accept`);
+        setPendingRequests((prev) => prev.filter((r) => r.id !== readingId));
+        navigate(`/reading/${readingId}`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to accept request';
+        addToast('error', msg);
+      } finally {
+        setActingOnId(null);
+      }
+    },
+    [addToast, navigate],
+  );
+
+  /* ── Decline request ── */
+  const handleDecline = useCallback(
+    async (readingId: number) => {
+      setActingOnId(readingId);
+      try {
+        await apiService.post(`/api/readings/${readingId}/decline`);
+        setPendingRequests((prev) => prev.filter((r) => r.id !== readingId));
+        addToast('info', 'Request declined');
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to decline request';
+        addToast('error', msg);
+      } finally {
+        setActingOnId(null);
+      }
+    },
+    [addToast],
+  );
 
   /* ── Toggle online/offline ── */
   const handleToggle = useCallback(async () => {
@@ -209,6 +316,88 @@ export function ReaderDashboard() {
               </div>
             </CardBody>
           </Card>
+        </section>
+
+        {/* ── Incoming Requests Inbox ────────────────── */}
+        <section className="section">
+          <h2 className="heading-3">
+            Incoming Requests
+            {pendingRequests.length > 0 && (
+              <Badge variant="pink" size="sm" style={{ marginLeft: 'var(--space-2)' }}>
+                {pendingRequests.length}
+              </Badge>
+            )}
+          </h2>
+          {pendingRequests.length === 0 ? (
+            <EmptyState
+              icon="📭"
+              title="No pending requests"
+              description={
+                isOnline
+                  ? 'You will be notified here when a client requests a reading.'
+                  : 'Go online to start receiving reading requests.'
+              }
+            />
+          ) : (
+            <div className="flex flex-col gap-3">
+              {pendingRequests.map((req) => {
+                const typeLabel =
+                  req.readingType.charAt(0).toUpperCase() + req.readingType.slice(1);
+                const icon =
+                  req.readingType === 'chat'
+                    ? '💬'
+                    : req.readingType === 'voice'
+                      ? '🎙️'
+                      : '📹';
+                const displayName =
+                  req.clientName || req.clientUsername || `Client #${req.clientId}`;
+                return (
+                  <Card key={req.id} variant="glow-pink" padding="sm">
+                    <CardBody>
+                      <div className="flex justify-between items-center gap-3">
+                        <div className="flex items-center gap-3">
+                          <Avatar
+                            src={req.clientAvatar || undefined}
+                            name={displayName}
+                            size="md"
+                          />
+                          <div>
+                            <h4 className="heading-5">{displayName}</h4>
+                            <p className="caption">
+                              {icon} {typeLabel} · {centsToDisplay(req.ratePerMinute)}/min
+                              {' · '}
+                              {new Date(req.createdAt).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => handleDecline(req.id)}
+                            disabled={actingOnId === req.id}
+                          >
+                            Decline
+                          </Button>
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => handleAccept(req.id)}
+                            disabled={actingOnId === req.id}
+                          >
+                            {actingOnId === req.id ? 'Accepting…' : 'Accept'}
+                          </Button>
+                        </div>
+                      </div>
+                    </CardBody>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
         </section>
 
         {/* ── Stats ──────────────────────────────────── */}
@@ -319,6 +508,14 @@ export function ReaderDashboard() {
             </div>
           )}
         </section>
+
+        {/* ── Chat Transcript Modal ──────────────────── */}
+        <ChatTranscriptModal
+          readingId={transcriptReadingId}
+          viewerUserId={user.id}
+          readerName={user.fullName || user.username || 'You'}
+          onClose={() => setTranscriptReadingId(null)}
+        />
       </div>
     </div>
   );

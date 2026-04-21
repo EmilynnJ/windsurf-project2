@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useReaders } from '../hooks/useReaders';
 import { useToast } from '../components/ToastProvider';
+import { apiService } from '../services/api';
 import {
   Button,
   Avatar,
@@ -94,12 +95,15 @@ export function HomePage() {
       }
       setSubmitting(true);
       try {
-        // Simulated newsletter signup
-        await new Promise((r) => setTimeout(r, 800));
+        await apiService.post('/api/newsletter/subscribe', { email: email.trim() });
         addToast('success', 'Welcome to the SoulSeer community! ✨');
         setEmail('');
-      } catch {
-        addToast('error', 'Something went wrong. Please try again.');
+      } catch (err) {
+        const message =
+          err instanceof Error && err.message
+            ? err.message
+            : 'Something went wrong. Please try again.';
+        addToast('error', message);
       } finally {
         setSubmitting(false);
       }

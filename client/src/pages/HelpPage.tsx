@@ -10,7 +10,8 @@ const LEGAL_LINKS = [
     icon: '🔒',
     title: 'Privacy Policy',
     description: 'How we collect, use, and protect your personal data and reading sessions.',
-    href: '#', // TODO: replace with Termly Privacy Policy URL
+    href: '/privacy',
+    internal: true,
   },
   {
     icon: '📜',
@@ -514,6 +515,14 @@ export function HelpPage() {
                 <p className="legal-card__desc">{doc.description}</p>
                 {doc.href === '#' ? (
                   <span className="legal-card__coming-soon">Coming Soon</span>
+                ) : 'internal' in doc && doc.internal ? (
+                  <Link
+                    to={doc.href}
+                    className="btn btn--sm btn--secondary"
+                    aria-label={`View ${doc.title}`}
+                  >
+                    View Document
+                  </Link>
                 ) : (
                   <a
                     href={doc.href}
