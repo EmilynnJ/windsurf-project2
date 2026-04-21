@@ -38,7 +38,7 @@ class BillingService {
         );
 
       for (const reading of stale) {
-        await this.endReading(reading.id, "missed");
+        await this.endReading(reading.id, "missed", "grace_period_expired");
         logger.warn({ readingId: reading.id }, "Reading ended due to stale heartbeat (grace period expired)");
       }
 
@@ -104,7 +104,7 @@ class BillingService {
 
     if (insufficientBalance) {
       // End reading outside transaction since endReading has its own transaction
-      await this.endReading(reading.id, "completed");
+      await this.endReading(reading.id, "completed", "insufficient_balance");
       wsService.broadcast(
         [reading.clientId, reading.readerId],
         "reading:insufficient_balance",
@@ -126,6 +126,7 @@ class BillingService {
   private async endReading(
     readingId: number,
     status: "completed" | "missed",
+    reason?: "insufficient_balance" | "grace_period_expired",
   ): Promise<void> {
     const db = getDb();
     const now = new Date();
@@ -217,6 +218,7 @@ class BillingService {
       {
         readingId,
         status,
+        reason,
         durationSeconds: finalized?.durationSeconds ?? reading.durationSeconds ?? 0,
         totalCharged: finalized?.totalCharged ?? reading.totalCharged ?? 0,
         readerEarned: finalized?.readerEarned ?? reading.readerEarned ?? 0,

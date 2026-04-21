@@ -757,10 +757,12 @@ export function ReadingSessionPage() {
       }>(`/api/readings/${reading.id}/end`);
 
       clearInterval(timerRef.current);
+      // Server returns financial fields in cents; convert to dollars for
+      // PostSessionSummary (which uses formatCost that expects dollars).
       setSummary({
         duration: result.duration,
-        totalCost: result.totalCost,
-        ratePerMinute: result.ratePerMinute,
+        totalCost: result.totalCost / 100,
+        ratePerMinute: result.ratePerMinute / 100,
       });
       setShowEndConfirm(false);
     } catch {
