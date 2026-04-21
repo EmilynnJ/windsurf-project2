@@ -66,6 +66,9 @@ export default function App() {
         redirect_uri: import.meta.env.VITE_AUTH0_REDIRECT_URI || window.location.origin,
         audience: import.meta.env.VITE_AUTH0_AUDIENCE || '',
       }}
+      onRedirectCallback={(appState) => {
+        window.history.replaceState({}, '', appState?.returnTo || '/dashboard');
+      }}
     >
       <BrowserRouter>
         <ToastProvider>

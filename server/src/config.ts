@@ -12,6 +12,7 @@ const envSchema = z.object({
   AGORA_APP_CERTIFICATE: z.string().default(''),
   STRIPE_SECRET_KEY: z.string().default(''),
   STRIPE_WEBHOOK_SECRET: z.string().default(''),
+  ADMIN_EMAILS: z.string().default('emilynnj14@gmail.com'),
 });
 
 function loadConfig() {
@@ -48,4 +49,5 @@ export const config = {
     secretKey: env.STRIPE_SECRET_KEY,
     webhookSecret: env.STRIPE_WEBHOOK_SECRET,
   },
+  adminEmails: env.ADMIN_EMAILS.split(',').map((e) => e.trim().toLowerCase()),
 } as const;

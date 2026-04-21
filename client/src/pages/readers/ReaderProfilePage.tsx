@@ -80,7 +80,7 @@ export function ReaderProfilePage() {
 
       setStartingType(type);
       try {
-        const reading = await apiService.post<{ id: number }>('/api/readings', {
+        const reading = await apiService.post<{ id: number }>('/api/readings/on-demand', {
           readerId: reader?.id,
           readingType: type,
         });

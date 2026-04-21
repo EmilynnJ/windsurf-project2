@@ -107,7 +107,7 @@ export function ReaderDashboard() {
     async function load() {
       try {
         const [sessionData, readerData] = await Promise.all([
-          apiService.get<Reading[]>('/api/readings/my'),
+          apiService.get<Reading[]>('/api/readings/reader'),
           apiService.get<{ reviews?: Review[] }>(`/api/readers/${user?.id}`).catch(() => ({ reviews: [] })),
         ]);
         setSessions(sessionData);
@@ -126,7 +126,7 @@ export function ReaderDashboard() {
     setToggling(true);
     try {
       const newStatus = !isOnline;
-      await apiService.patch('/api/users/me/online', { isOnline: newStatus });
+      await apiService.patch('/api/me/online', { isOnline: newStatus });
       setIsOnline(newStatus);
       addToast('success', newStatus ? 'You are now Online! ✨' : 'You are now Offline');
       if (refreshUser) refreshUser();
@@ -141,7 +141,7 @@ export function ReaderDashboard() {
   const handleSaveRates = useCallback(async () => {
     setSavingRates(true);
     try {
-      await apiService.patch('/api/users/me/pricing', {
+      await apiService.patch('/api/me/pricing', {
         pricingChat: Math.round((parseFloat(chatRate) || 0) * 100),
         pricingVoice: Math.round((parseFloat(voiceRate) || 0) * 100),
         pricingVideo: Math.round((parseFloat(videoRate) || 0) * 100),

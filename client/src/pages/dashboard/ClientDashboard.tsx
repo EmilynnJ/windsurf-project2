@@ -146,7 +146,7 @@ export function ClientDashboard() {
     async function load() {
       try {
         const [readingData, txData] = await Promise.all([
-          apiService.get<Reading[]>('/api/readings/my'),
+          apiService.get<Reading[]>('/api/readings/client'),
           apiService.get<Transaction[]>('/api/payments/transactions'),
         ]);
         setReadings(readingData);
@@ -171,7 +171,7 @@ export function ClientDashboard() {
     setAddingFunds(true);
     try {
       const amountCents = Math.round(amountDollars * 100);
-      await apiService.post('/api/payments/create-payment-intent', { amount: amountCents });
+      await apiService.post('/api/payments/create-intent', { amount: amountCents });
       addToast('success', `$${amountDollars.toFixed(2)} added to your balance! ✨`);
       setShowAddFunds(false);
       setSelectedAmount(25);
