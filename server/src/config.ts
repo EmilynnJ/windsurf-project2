@@ -22,6 +22,14 @@ const envSchema = z.object({
   CLOUDINARY_CLOUD_NAME: z.string().default(''),
   CLOUDINARY_API_KEY: z.string().default(''),
   CLOUDINARY_API_SECRET: z.string().default(''),
+  // Optional: Brevo (Sendinblue) transactional email.
+  BREVO_API_KEY: z.string().default(''),
+  BREVO_SENDER_EMAIL: z.string().default('hello@soulseerpsychics.com'),
+  BREVO_SENDER_NAME: z.string().default('SoulSeer'),
+  NEWSLETTER_WELCOME_ENABLED: z
+    .string()
+    .default('true')
+    .transform((v) => v.toLowerCase() !== 'false'),
   ADMIN_EMAILS: z.string().default('emilynnj14@gmail.com'),
 });
 
@@ -72,6 +80,13 @@ export const config = {
     enabled: Boolean(
       env.CLOUDINARY_CLOUD_NAME && env.CLOUDINARY_API_KEY && env.CLOUDINARY_API_SECRET,
     ),
+  },
+  brevo: {
+    apiKey: env.BREVO_API_KEY,
+    senderEmail: env.BREVO_SENDER_EMAIL,
+    senderName: env.BREVO_SENDER_NAME,
+    welcomeEnabled: env.NEWSLETTER_WELCOME_ENABLED,
+    enabled: Boolean(env.BREVO_API_KEY),
   },
   adminEmails: env.ADMIN_EMAILS.split(',').map((e) => e.trim().toLowerCase()),
 } as const;

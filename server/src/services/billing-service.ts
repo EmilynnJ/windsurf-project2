@@ -258,25 +258,25 @@ class BillingService {
         ),
       );
 
-    if (sessions.length === 0) return;
+    if (sessions.length > 0) {
+      await db
+        .update(readings)
+        .set({ status: "paused", updatedAt: now })
+        .where(
+          and(
+            eq(readings.readerId, readerId),
+            inArray(readings.status, ["accepted", "in_progress", "active"] as const),
+          ),
+        );
 
-    await db
-      .update(readings)
-      .set({ status: "paused", updatedAt: now })
-      .where(
-        and(
-          eq(readings.readerId, readerId),
-          inArray(readings.status, ["accepted", "in_progress", "active"] as const),
-        ),
-      );
-
-    for (const s of sessions) {
-      wsService.broadcast(
-        [s.clientId, readerId],
-        "reading:partner_disconnected",
-        { readingId: s.id, partnerRole: "reader", previousStatus: s.status },
-      );
-      logger.info({ readingId: s.id, readerId }, "Reading paused: reader went offline");
+      for (const s of sessions) {
+        wsService.broadcast(
+          [s.clientId, readerId],
+          "reading:partner_disconnected",
+          { readingId: s.id, partnerRole: "reader", previousStatus: s.status },
+        );
+        logger.info({ readingId: s.id, readerId }, "Reading paused: reader went offline");
+      }
     }
 
     // Also cancel any still-pending requests so the client UI clears them.
