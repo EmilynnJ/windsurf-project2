@@ -1,5 +1,6 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { Auth0Provider, type AppState } from '@auth0/auth0-react';
+import { type ReactNode } from 'react';
 import { AuthProvider } from './contexts/AuthContext';
 import { WebSocketProvider } from './contexts/WebSocketContext';
 import { ToastProvider } from './components/ToastProvider';
@@ -49,31 +50,53 @@ function AppRoutes() {
   );
 }
 
-export default function App() {
-  // Strip any protocol prefix — Auth0Provider expects just the domain (no https://)
+/**
+ * Auth0 provider that navigates via React Router after the login callback.
+ *
+ * Must be rendered INSIDE <BrowserRouter> so useNavigate() is available.
+ * Previous versions used window.history.replaceState in onRedirectCallback,
+ * which did not trigger a React Router re-render — the URL updated but the
+ * page stayed on HomePage, making it look like /dashboard didn't exist.
+ */
+function Auth0ProviderWithNavigate({ children }: { children: ReactNode }) {
+  const navigate = useNavigate();
+
   const auth0Domain = (import.meta.env.VITE_AUTH0_DOMAIN || '')
     .replace(/^https?:\/\//, '')
     .replace(/\/$/, '');
+  const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID || '';
 
-  if (!auth0Domain || !import.meta.env.VITE_AUTH0_CLIENT_ID) {
+  if (!auth0Domain || !clientId) {
     console.error(
-      '[SoulSeer] Auth0 env vars missing. Ensure VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID are set in your Vercel project environment variables.'
+      '[SoulSeer] Auth0 env vars missing. Ensure VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID are set in your Vercel project environment variables.',
     );
   }
+
+  const onRedirectCallback = (appState?: AppState) => {
+    const target = appState?.returnTo || '/dashboard';
+    navigate(target, { replace: true });
+  };
 
   return (
     <Auth0Provider
       domain={auth0Domain}
-      clientId={import.meta.env.VITE_AUTH0_CLIENT_ID || ''}
+      clientId={clientId}
       authorizationParams={{
-        redirect_uri: import.meta.env.VITE_AUTH0_REDIRECT_URI || window.location.origin,
+        redirect_uri:
+          import.meta.env.VITE_AUTH0_REDIRECT_URI || window.location.origin,
         audience: import.meta.env.VITE_AUTH0_AUDIENCE || '',
       }}
-      onRedirectCallback={(appState?: AppState) => {
-        window.history.replaceState({}, '', appState?.returnTo || '/dashboard');
-      }}
+      onRedirectCallback={onRedirectCallback}
     >
-      <BrowserRouter>
+      {children}
+    </Auth0Provider>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Auth0ProviderWithNavigate>
         <ToastProvider>
           <AuthProvider>
             <WebSocketProvider>
@@ -81,7 +104,7 @@ export default function App() {
             </WebSocketProvider>
           </AuthProvider>
         </ToastProvider>
-      </BrowserRouter>
-    </Auth0Provider>
+      </Auth0ProviderWithNavigate>
+    </BrowserRouter>
   );
 }
