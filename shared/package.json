@@ -2,25 +2,32 @@
   "name": "@soulseer/shared",
   "version": "0.0.0",
   "private": true,
-  "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "require": "./dist/index.js",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./schema": {
       "types": "./dist/schema.d.ts",
-      "import": "./dist/schema.js"
+      "require": "./dist/schema.js",
+      "import": "./dist/schema.js",
+      "default": "./dist/schema.js"
     },
     "./types": {
       "types": "./dist/types.d.ts",
-      "import": "./dist/types.js"
+      "require": "./dist/types.js",
+      "import": "./dist/types.js",
+      "default": "./dist/types.js"
     },
     "./validators": {
       "types": "./dist/validators.d.ts",
-      "import": "./dist/validators.js"
+      "require": "./dist/validators.js",
+      "import": "./dist/validators.js",
+      "default": "./dist/validators.js"
     }
   },
   "scripts": {

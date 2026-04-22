@@ -4,23 +4,19 @@
  */
 import express from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import helmet from 'helmet';
 import cors from 'cors';
 
 // Import server config and routes
-import { config } from './config.js';
-import { generalLimiter } from './middleware/rate-limit.js';
-import { globalErrorHandler } from './middleware/error-handler.js';
-import authRoutes from './routes/auth.js';
-import userRoutes from './routes/users.js';
-import readingRoutes from './routes/readings.js';
-import paymentRoutes from './routes/payments.js';
-import forumRoutes from './routes/forum.js';
-import adminRoutes from './routes/admin.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { config } from './config';
+import { generalLimiter } from './middleware/rate-limit';
+import { globalErrorHandler } from './middleware/error-handler';
+import authRoutes from './routes/auth';
+import userRoutes from './routes/users';
+import readingRoutes from './routes/readings';
+import paymentRoutes from './routes/payments';
+import forumRoutes from './routes/forum';
+import adminRoutes from './routes/admin';
 
 const app = express();
 
