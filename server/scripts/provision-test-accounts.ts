@@ -97,25 +97,40 @@ async function main() {
     // 1) Create (or reuse) the Auth0 user.
     let auth0Id: string | null = null;
     try {
-      const resp = await mgmt.users.create({
+      // Not all Auth0 DB connections have `requires_username` enabled; only
+      // include the username field when the connection supports it (the
+      // Management API returns 400 otherwise). Default to omitting it.
+      const includeUsername =
+        process.env.AUTH0_CONNECTION_REQUIRES_USERNAME === 'true';
+      const createBody: Record<string, unknown> = {
         connection: config.auth0Management.dbConnection,
         email: spec.email,
         password: spec.password,
         email_verified: true,
         verify_email: false,
         name: spec.fullName,
-        username: spec.username,
         user_metadata: { role: spec.label, source: 'test-provisioning' },
         app_metadata: { role: spec.label },
-      });
+      };
+      if (includeUsername) createBody.username = spec.username;
+      const resp = await mgmt.users.create(
+        createBody as Parameters<typeof mgmt.users.create>[0],
+      );
       auth0Id = resp.data.user_id ?? null;
       console.log(`  Auth0 user created: ${auth0Id}`);
     } catch (err) {
       const status = (err as { statusCode?: number }).statusCode;
       if (status === 409) {
         console.log('  Auth0 user already exists — looking up…');
-        const existing = await mgmt.usersByEmail.getByEmail({ email: spec.email });
-        const rows = Array.isArray(existing.data) ? existing.data : [];
+        const existing = await mgmt.users.listUsersByEmail({ email: spec.email });
+        // The SDK sometimes returns the array directly, sometimes wrapped
+        // under `.data` depending on version / transport.
+        const rawRows: unknown = Array.isArray(existing)
+          ? existing
+          : (existing as { data?: unknown }).data;
+        const rows = Array.isArray(rawRows)
+          ? (rawRows as Array<{ user_id?: string }>)
+          : [];
         auth0Id = rows[0]?.user_id ?? null;
         if (!auth0Id) {
           console.error('  Could not resolve Auth0 user_id for existing account');
@@ -124,7 +139,7 @@ async function main() {
         console.log(`  Resolved existing Auth0 user: ${auth0Id}`);
         // Make sure the password matches what the caller expects.
         try {
-          await mgmt.users.update({ id: auth0Id }, { password: spec.password });
+          await mgmt.users.update(auth0Id, { password: spec.password });
           console.log('  Password updated to the supplied value');
         } catch (updateErr) {
           console.warn('  Failed to update password on existing Auth0 user:', updateErr);
