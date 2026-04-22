@@ -74,9 +74,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [auth0Loading, refreshUser]);
 
-  const login = useCallback(() => {
-    loginWithRedirect({ appState: { returnTo: '/dashboard' } });
-  }, [loginWithRedirect]);
+  const login = useCallback(
+    () => loginWithRedirect({ appState: { returnTo: '/dashboard' } }),
+    [loginWithRedirect],
+  );
 
   const logout = useCallback(() => {
     apiService.setAccessToken(null);

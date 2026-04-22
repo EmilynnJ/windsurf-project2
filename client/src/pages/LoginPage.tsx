@@ -60,9 +60,17 @@ export function LoginPage() {
           <Button
             variant="primary"
             size="lg"
-            onClick={() => {
+            onClick={async () => {
               setClicked(true);
-              login();
+              try {
+                await login();
+              } catch (err) {
+                // If Auth0 redirect fails (blocked popup, bad config, offline),
+                // drop the spinner so the user can retry instead of being
+                // stuck forever.
+                console.error('[LoginPage] loginWithRedirect failed:', err);
+                setClicked(false);
+              }
             }}
           >
             Sign in
