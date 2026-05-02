@@ -61,23 +61,10 @@ function AppRoutes() {
 function Auth0ProviderWithNavigate({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
 
-  const auth0Domain = (import.meta.env.VITE_AUTH0_DOMAIN || '')
+  const auth0Domain = (import.meta.env.VITE_AUTH0_DOMAIN || 'dev-2x1dti3irhuz62jc.us.auth0.com')
     .replace(/^https?:\/\//, '')
     .replace(/\/$/, '');
-  const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID || '';
-
-  console.log('[SoulSeer] Auth0 config →', {
-    VITE_AUTH0_DOMAIN: import.meta.env.VITE_AUTH0_DOMAIN,
-    VITE_AUTH0_CLIENT_ID: import.meta.env.VITE_AUTH0_CLIENT_ID,
-    VITE_AUTH0_AUDIENCE: import.meta.env.VITE_AUTH0_AUDIENCE,
-    resolvedDomain: auth0Domain,
-  });
-
-  if (!auth0Domain || !clientId) {
-    console.error(
-      '[SoulSeer] Auth0 env vars missing. Ensure VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID are set in your Vercel project environment variables.',
-    );
-  }
+  const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID || 'v94S3wtQm2JDqeJEBF6It0G4pJLEOwkD';
 
   const onRedirectCallback = (appState?: AppState) => {
     const target = appState?.returnTo || '/dashboard';
@@ -91,7 +78,7 @@ function Auth0ProviderWithNavigate({ children }: { children: ReactNode }) {
       authorizationParams={{
         redirect_uri:
           import.meta.env.VITE_AUTH0_REDIRECT_URI || window.location.origin,
-        audience: import.meta.env.VITE_AUTH0_AUDIENCE || '',
+        audience: import.meta.env.VITE_AUTH0_AUDIENCE || 'https://api.soulseerpsychics.vercel.app',
       }}
       onRedirectCallback={onRedirectCallback}
     >

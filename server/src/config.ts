@@ -6,12 +6,9 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(5000),
   CORS_ORIGIN: z.string().default('http://localhost:3000'),
   DATABASE_URL: z.string().min(1),
-  AUTH0_DOMAIN: z.string().min(1),
-  AUTH0_AUDIENCE: z.string().min(1),
-  // Optional: Auth0 Management API credentials for creating reader accounts.
-  // Create a Machine-to-Machine app in Auth0 authorized for the Management API
-  // with scopes: create:users, read:users, update:users.
-  AUTH0_MGMT_CLIENT_ID: z.string().default(''),
+  AUTH0_DOMAIN: z.string().default('dev-2x1dti3irhuz62jc.us.auth0.com'),
+  AUTH0_AUDIENCE: z.string().default('https://api.soulseerpsychics.vercel.app'),
+  AUTH0_MGMT_CLIENT_ID: z.string().default('693253d01a25578349323a8d'),
   AUTH0_MGMT_CLIENT_SECRET: z.string().default(''),
   AUTH0_DB_CONNECTION: z.string().default('Username-Password-Authentication'),
   AGORA_APP_ID: z.string().default(''),
