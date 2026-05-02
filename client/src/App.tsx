@@ -61,10 +61,16 @@ function AppRoutes() {
 function Auth0ProviderWithNavigate({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
 
-  const auth0Domain = (import.meta.env.VITE_AUTH0_DOMAIN || 'dev-2x1dti3irhuz62jc.us.auth0.com')
+  const auth0Domain = (import.meta.env.VITE_AUTH0_DOMAIN || '')
     .replace(/^https?:\/\//, '')
     .replace(/\/$/, '');
-  const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID || 'v94S3wtQm2JDqeJEBF6It0G4pJLEOwkD';
+  const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID || '';
+
+  if (!auth0Domain || !clientId) {
+    console.error(
+      '[SoulSeer] Auth0 env vars missing. Ensure VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID are set.',
+    );
+  }
 
   const onRedirectCallback = (appState?: AppState) => {
     const target = appState?.returnTo || '/dashboard';
@@ -78,7 +84,7 @@ function Auth0ProviderWithNavigate({ children }: { children: ReactNode }) {
       authorizationParams={{
         redirect_uri:
           import.meta.env.VITE_AUTH0_REDIRECT_URI || window.location.origin,
-        audience: import.meta.env.VITE_AUTH0_AUDIENCE || 'https://api.soulseerpsychics.vercel.app',
+        audience: import.meta.env.VITE_AUTH0_AUDIENCE || '',
       }}
       onRedirectCallback={onRedirectCallback}
     >
