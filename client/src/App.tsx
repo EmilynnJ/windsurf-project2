@@ -68,7 +68,7 @@ function Auth0ProviderWithNavigate({ children }: { children: ReactNode }) {
 
   if (!auth0Domain || !clientId) {
     console.error(
-      '[SoulSeer] Auth0 env vars missing. Ensure VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID are set in your Vercel project environment variables.',
+      '[SoulSeer] Auth0 env vars missing. Ensure VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID are set.',
     );
   }
 

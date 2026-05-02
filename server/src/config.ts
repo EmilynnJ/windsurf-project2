@@ -8,9 +8,6 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   AUTH0_DOMAIN: z.string().min(1),
   AUTH0_AUDIENCE: z.string().min(1),
-  // Optional: Auth0 Management API credentials for creating reader accounts.
-  // Create a Machine-to-Machine app in Auth0 authorized for the Management API
-  // with scopes: create:users, read:users, update:users.
   AUTH0_MGMT_CLIENT_ID: z.string().default(''),
   AUTH0_MGMT_CLIENT_SECRET: z.string().default(''),
   AUTH0_DB_CONNECTION: z.string().default('Username-Password-Authentication'),
