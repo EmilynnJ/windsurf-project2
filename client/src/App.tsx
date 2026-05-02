@@ -66,6 +66,13 @@ function Auth0ProviderWithNavigate({ children }: { children: ReactNode }) {
     .replace(/\/$/, '');
   const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID || '';
 
+  console.log('[SoulSeer] Auth0 config →', {
+    VITE_AUTH0_DOMAIN: import.meta.env.VITE_AUTH0_DOMAIN,
+    VITE_AUTH0_CLIENT_ID: import.meta.env.VITE_AUTH0_CLIENT_ID,
+    VITE_AUTH0_AUDIENCE: import.meta.env.VITE_AUTH0_AUDIENCE,
+    resolvedDomain: auth0Domain,
+  });
+
   if (!auth0Domain || !clientId) {
     console.error(
       '[SoulSeer] Auth0 env vars missing. Ensure VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID are set in your Vercel project environment variables.',
