@@ -15,10 +15,8 @@ const NAV_ITEMS = [
 ] as const;
 
 function Navigation() {
-  const { isAuthenticated, isAuth0Authenticated, user, login, logout } = useAuth();
-  const showSignedInUi = isAuth0Authenticated || isAuthenticated || !!user;
-  const dashboardRoute = user ? '/dashboard' : '/login';
-  const profileRoute = user?.id ? `/readers/${user.id}` : '/dashboard';
+  const { isAuthenticated, user, login, logout, authError } = useAuth();
+  const dashboardHref = user ? `/dashboard/${user.role}` : '/dashboard';
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const location = useLocation();
@@ -78,6 +76,36 @@ function Navigation() {
       role="navigation"
       aria-label="Main navigation"
     >
+      {authError && (
+        <div
+          role="alert"
+          style={{
+            background: 'rgba(255, 105, 180, 0.18)',
+            color: '#fff',
+            padding: '0.5rem 1rem',
+            fontSize: '0.85rem',
+            textAlign: 'center',
+            borderBottom: '1px solid rgba(255, 105, 180, 0.45)',
+          }}
+        >
+          Sign-in problem: {authError}{' '}
+          <button
+            type="button"
+            onClick={() => logout()}
+            style={{
+              marginLeft: '0.5rem',
+              background: 'transparent',
+              color: '#FF69B4',
+              border: '1px solid #FF69B4',
+              borderRadius: 4,
+              padding: '0.15rem 0.6rem',
+              cursor: 'pointer',
+            }}
+          >
+            Reset session
+          </button>
+        </div>
+      )}
       <div className="nav__inner">
         {/* Brand */}
         <Link to="/" className="nav__brand" aria-label="SoulSeer Home">
@@ -95,7 +123,7 @@ function Navigation() {
           ))}
           {showSignedInUi && (
             <li>
-              <NavLink to={dashboardRoute} className={linkClass}>
+              <NavLink to={dashboardHref} className={linkClass}>
                 Dashboard
               </NavLink>
             </li>
@@ -154,8 +182,8 @@ function Navigation() {
             {item.label}
           </NavLink>
         ))}
-        {showSignedInUi && (
-          <NavLink to={dashboardRoute} className={mobileLinkClass}>
+        {isAuthenticated && (
+          <NavLink to={dashboardHref} className={mobileLinkClass}>
             Dashboard
           </NavLink>
         )}

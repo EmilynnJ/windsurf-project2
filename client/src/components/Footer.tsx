@@ -18,6 +18,8 @@ function Footer() {
   const dashboardRoute = user ? '/dashboard' : '/login';
   const profileRoute = user?.id ? `/readers/${user.id}` : '/dashboard';
   const year = new Date().getFullYear();
+  const { isAuthenticated, user } = useAuth();
+  const dashboardHref = user ? `/dashboard/${user.role}` : '/dashboard';
 
   return (
     <footer className="footer" role="contentinfo">
@@ -28,6 +30,13 @@ function Footer() {
 
         <nav aria-label="Footer navigation">
           <ul className="footer__links">
+            {isAuthenticated && (
+              <li>
+                <Link to={dashboardHref} className="footer__link">
+                  Dashboard
+                </Link>
+              </li>
+            )}
             {footerLinks.map((link) => (
               <li key={link.to}>
                 <Link to={link.to} className="footer__link">

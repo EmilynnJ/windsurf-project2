@@ -1,8 +1,5 @@
 import { useAuth } from '../../hooks/useAuth';
 import { LoadingPage, Button } from '../../components/ui';
-import { ClientDashboard } from './ClientDashboard';
-import { ReaderDashboard } from './ReaderDashboard';
-import { AdminDashboard } from './AdminDashboard';
 import { Navigate } from 'react-router-dom';
 
 export function DashboardPage() {
@@ -60,13 +57,13 @@ export function DashboardPage() {
     return <Navigate to="/login" replace />;
   }
 
-  switch (user.role) {
-    case 'admin':
-      return <AdminDashboard />;
-    case 'reader':
-      return <ReaderDashboard />;
-    case 'client':
-    default:
-      return <ClientDashboard />;
-  }
+  // Redirect to the role-specific dashboard URL so deep-links and shared URLs
+  // resolve cleanly. RoleRoute on the destination handles guarding.
+  const target =
+    user.role === 'admin'
+      ? '/dashboard/admin'
+      : user.role === 'reader'
+        ? '/dashboard/reader'
+        : '/dashboard/client';
+  return <Navigate to={target} replace />;
 }
