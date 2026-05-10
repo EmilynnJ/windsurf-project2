@@ -5,6 +5,7 @@ import type { AuthState, User } from '../types';
 
 export interface AuthStateWithError extends AuthState {
   authError: string | null;
+  isAuth0Authenticated: boolean;
 }
 
 export const AuthContext = createContext<AuthStateWithError | null>(null);
@@ -91,6 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         isAuthenticated: auth0IsAuth && !!user,
+        isAuth0Authenticated: auth0IsAuth,
         isLoading: auth0Loading || isLoading,
         authError,
         login,
