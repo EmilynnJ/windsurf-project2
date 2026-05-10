@@ -16,7 +16,8 @@ const NAV_ITEMS = [
 
 function Navigation() {
   const { isAuthenticated, isAuth0Authenticated, user, login, logout } = useAuth();
-  const showSignedInUi = isAuth0Authenticated || isAuthenticated;
+  const showSignedInUi = isAuth0Authenticated || isAuthenticated || !!user;
+  const dashboardRoute = user ? '/dashboard' : '/login';
   const profileRoute = user?.id ? `/readers/${user.id}` : '/dashboard';
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
@@ -94,7 +95,7 @@ function Navigation() {
           ))}
           {showSignedInUi && (
             <li>
-              <NavLink to="/dashboard" className={linkClass}>
+              <NavLink to={dashboardRoute} className={linkClass}>
                 Dashboard
               </NavLink>
             </li>
@@ -154,7 +155,7 @@ function Navigation() {
           </NavLink>
         ))}
         {showSignedInUi && (
-          <NavLink to="/dashboard" className={mobileLinkClass}>
+          <NavLink to={dashboardRoute} className={mobileLinkClass}>
             Dashboard
           </NavLink>
         )}

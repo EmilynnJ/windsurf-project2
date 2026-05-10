@@ -6,7 +6,15 @@ import { AdminDashboard } from './AdminDashboard';
 import { Navigate } from 'react-router-dom';
 
 export function DashboardPage() {
-  const { user, isAuthenticated, isLoading, authError, refreshUser, logout } = useAuth();
+  const {
+    user,
+    isAuthenticated,
+    isAuth0Authenticated,
+    isLoading,
+    authError,
+    refreshUser,
+    logout,
+  } = useAuth();
 
   if (isLoading) {
     return <LoadingPage message="Preparing your dashboard..." />;
@@ -42,7 +50,13 @@ export function DashboardPage() {
     );
   }
 
-  if (!isAuthenticated || !user) {
+  // If Auth0 says the user is signed in but backend sync is still settling,
+  // keep them on a loading state instead of kicking them back to /login.
+  if (isAuth0Authenticated && !user) {
+    return <LoadingPage message="Finalizing your account and dashboard..." />;
+  }
+
+  if (!user && !isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
 
