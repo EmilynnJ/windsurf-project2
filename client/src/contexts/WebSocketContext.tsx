@@ -114,7 +114,12 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   const connect = useCallback(async () => {
     if (!shouldConnectRef.current) return;
     const base = resolveWsUrl();
-    if (!base) return;
+    if (!base) {
+      console.warn(
+        '[ws] no WebSocket URL resolved — set VITE_WS_URL to your Fly.io (or other long-running) server, e.g. wss://<app>.fly.dev',
+      );
+      return;
+    }
 
     let token: string;
     try {
@@ -126,11 +131,12 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     }
 
     const url = `${base}/ws`;
+    console.info(`[ws] connecting to ${url}`);
     let ws: WebSocket;
     try {
       ws = new WebSocket(url, ['access_token', token]);
     } catch (err) {
-      console.warn('[ws] failed to construct WebSocket', err);
+      console.warn(`[ws] failed to construct WebSocket for ${url}`, err);
       scheduleReconnect();
       return;
     }
@@ -139,6 +145,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     ws.addEventListener('open', () => {
       reconnectAttemptsRef.current = 0;
       setConnected(true);
+      console.info(`[ws] connected to ${url}`);
       if (pingTimerRef.current) clearInterval(pingTimerRef.current);
       pingTimerRef.current = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -158,8 +165,11 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    const handleClose = () => {
+    const handleClose = (event: CloseEvent) => {
       setConnected(false);
+      console.warn(
+        `[ws] closed (code=${event.code}, reason=${event.reason || 'n/a'}); will reconnect`,
+      );
       if (pingTimerRef.current) {
         clearInterval(pingTimerRef.current);
         pingTimerRef.current = null;
@@ -168,7 +178,8 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       if (shouldConnectRef.current) scheduleReconnect();
     };
     ws.addEventListener('close', handleClose);
-    ws.addEventListener('error', () => {
+    ws.addEventListener('error', (ev) => {
+      console.warn('[ws] error event', ev);
       try {
         ws.close();
       } catch (err) {
