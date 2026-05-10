@@ -42,24 +42,10 @@
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "drizzle-orm": "^0.45.2",
->>>>>>> b0ebfcb9039e92c09e9e94e90785289e0a1daeb8
     "express": "^4.21.2",
     "express-oauth2-jwt-bearer": "^1.6.0",
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.1.0",
-<<<<<<< HEAD
-    "jwks-rsa": "^3.1.0",
-    "multer": "^1.4.5-lts.1",
-    "pg": "^8.13.1",
-    "pino": "^9.9.0",
-    "pino-http": "^10.0.0",
-    "sdk": "^0.0.8",
-    "serverless-http": "^4.0.0",
-    "stripe": "^17.2.0",
-    "uuid": "^11.0.3",
-    "vite": "^8.0.11",
-    "zod": "^4.0.0"
-=======
     "jose": "^5.9.6",
     "multer": "^2.1.1",
     "pino": "^9.9.0",
@@ -67,7 +53,6 @@
     "stripe": "^17.2.0",
     "ws": "^8.18.0",
     "zod": "^3.23.8"
->>>>>>> b0ebfcb9039e92c09e9e94e90785289e0a1daeb8
   },
   "devDependencies": {
     "@types/cors": "^2.8.18",
