@@ -7,7 +7,7 @@ import { config } from '../config';
 import { logger } from '../utils/logger';
 import { AppError } from '../middleware/error-handler';
 
-const stripe = new Stripe(config.stripe.secretKey, { apiVersion: '2024-06-20' as any });
+const stripe = new Stripe(config.stripe.secretKey, { apiVersion: '2024-06-20' as Stripe.LatestApiVersion });
 
 export async function createPaymentIntent(userId: number, amountCents: number) {
   const db = getDb();
@@ -41,20 +41,54 @@ export async function createConnectAccount(userId: number, email: string) {
 
 export async function createPayout(readerId: number) {
   const db = getDb();
-  const [reader] = await db.select().from(users).where(eq(users.id, readerId));
-  if (!reader) throw new AppError(404, 'Reader not found');
-  if (!reader.stripeAccountId) throw new AppError(400, 'No Stripe Connect');
-  if (reader.balance < 1500) throw new AppError(400, 'Min payout $15.00');
-  const amount = reader.balance;
-  const balanceBefore = reader.balance;
-  const result = await db.update(users).set({ balance: 0, updatedAt: new Date() })
-    .where(sql`${users.id} = ${readerId} AND ${users.balance} = ${amount}`).returning({ id: users.id });
-  if (!result.length) throw new AppError(409, 'Balance changed, retry');
-  const transfer = await stripe.transfers.create({ amount, currency: 'usd', destination: reader.stripeAccountId });
-  await db.insert(transactions).values({
-    userId: readerId, type: 'reader_payout', amount: -amount,
-    balanceBefore, balanceAfter: 0,
-    stripePaymentIntentId: transfer.id, note: `Payout $${(amount / 100).toFixed(2)}`,
+
+  // Use a transaction with row-level locking to prevent the TOCTOU race
+  // condition where balance changes between SELECT and UPDATE.
+  let transferResult: { transferId: string; amount: number };
+
+  await db.transaction(async (tx) => {
+    // Lock the reader row for update — prevents concurrent payouts from
+    // double-spending the balance.
+    const [reader] = await tx
+      .select()
+      .from(users)
+      .where(eq(users.id, readerId))
+      .for('update');
+
+    if (!reader) throw new AppError(404, 'Reader not found');
+    if (!reader.stripeAccountId) throw new AppError(400, 'No Stripe Connect');
+    if (reader.balance < 1500) throw new AppError(400, 'Min payout $15.00');
+
+    const amount = reader.balance;
+    const balanceBefore = reader.balance;
+
+    // Perform Stripe transfer first — if it fails, the TX rolls back and
+    // balance is untouched.
+    const transfer = await stripe.transfers.create({
+      amount,
+      currency: 'usd',
+      destination: reader.stripeAccountId,
+    });
+
+    // Zero the balance now that Stripe transfer succeeded.
+    await tx
+      .update(users)
+      .set({ balance: 0, updatedAt: new Date() })
+      .where(eq(users.id, readerId));
+
+    // Record the transaction ledger entry.
+    await tx.insert(transactions).values({
+      userId: readerId,
+      type: 'reader_payout',
+      amount: -amount,
+      balanceBefore,
+      balanceAfter: 0,
+      stripePaymentIntentId: transfer.id,
+      note: `Payout $${(amount / 100).toFixed(2)}`,
+    });
+
+    transferResult = { transferId: transfer.id, amount };
   });
-  return { transferId: transfer.id, amount };
+
+  return transferResult!;
 }

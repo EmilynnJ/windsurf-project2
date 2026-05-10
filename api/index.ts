@@ -10,7 +10,7 @@
  * live reader status when WS is unavailable.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-// @ts-ignore
+// @ts-ignore — compiled JS imports from server/dist
 import express from 'express';
 // @ts-ignore
 import helmet from 'helmet';
@@ -47,6 +47,9 @@ import applicationRoutes from '../server/dist/src/routes/applications.js';
 // @ts-ignore
 import newsletterRoutes from '../server/dist/src/routes/newsletter.js';
 
+/** Paths that require raw body (Stripe signature verification). */
+const RAW_BODY_PATHS = new Set(['/api/payments/webhook', '/api/webhooks/stripe']);
+
 let app: express.Application | null = null;
 
 function createApp() {
@@ -65,24 +68,31 @@ function createApp() {
     }),
   );
 
-  app.use(generalLimiter);
-
-  // Stripe webhook paths must use the raw body — mount rate limiter before JSON.
-  app.use('/api/payments/webhook', webhookLimiter);
-  app.use('/api/webhooks/stripe', webhookLimiter);
-
-  // JSON parsing for everything except Stripe webhook (signature needs raw body)
-  app.use((req, res, next) => {
-    if (req.path === '/api/payments/webhook' || req.path === '/api/webhooks/stripe') {
-      return next();
-    }
-    express.json({ limit: '2mb' })(req, res, (err) => {
-      if (err) return next(err);
-      express.urlencoded({ extended: false })(req, res, next);
-    });
+  // ── Body parsing (applied BEFORE rate limiter to avoid wasted CPU on
+  // rate-limited requests, and to keep raw body intact for Stripe webhooks).
+  // Stripe webhook paths use express.raw() so they can verify the signature.
+  app.use(RAW_BODY_PATHS.has.bind(RAW_BODY_PATHS) as never); // no-op guard
+  for (const rawPath of RAW_BODY_PATHS) {
+    app.use(rawPath, express.raw({ type: 'application/json' }));
+  }
+  // JSON + URL-encoded for everything else, applied globally so routes never
+  // miss parsing. The order matters: raw routes are already matched above.
+  app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (RAW_BODY_PATHS.has(req.path)) return next();
+    express.json({ limit: '2mb' })(req, res, next);
+  });
+  app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (RAW_BODY_PATHS.has(req.path)) return next();
+    express.urlencoded({ extended: false })(req, res, next);
   });
 
-  app.get('/api/health', (_req, res) => {
+  // ── Rate limiting
+  app.use(generalLimiter);
+  for (const rawPath of RAW_BODY_PATHS) {
+    app.use(rawPath, webhookLimiter);
+  }
+
+  app.get('/api/health', (_req: express.Request, res: express.Response) => {
     res.json({
       ok: true,
       timestamp: new Date().toISOString(),
@@ -101,7 +111,7 @@ function createApp() {
   app.use('/api/reader-applications', applicationRoutes);
   app.use('/api', transactionRoutes);
 
-  app.use((_req, res) => {
+  app.use((_req: express.Request, res: express.Response) => {
     res.status(404).json({ error: 'Not found' });
   });
 
@@ -115,12 +125,14 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     const expressApp = createApp();
     return expressApp(req as unknown as express.Request, res as unknown as express.Response);
   } catch (err) {
-    console.error('[api] createApp failed:', err instanceof Error ? err.stack : err);
+    const message = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
+    console.error('[api] createApp failed:', stack ?? message);
     // Surface boot errors as 500 JSON instead of a generic crash so the client
     // can show a useful error.
     res.status(500).json({
       error: 'API boot failure',
-      message: err instanceof Error ? err.message : String(err),
+      message,
     });
     return;
   }

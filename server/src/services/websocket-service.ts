@@ -21,7 +21,10 @@ class WebSocketService {
   private jwks: ReturnType<typeof jose.createRemoteJWKSet> | null = null;
 
   attach(server: http.Server): void {
-    this.wss = new WebSocketServer({ noServer: true });
+    this.wss = new WebSocketServer({
+      noServer: true,
+      handleProtocols: (protocols) => Array.from(protocols)[0] || false,
+    });
     this.jwks = jose.createRemoteJWKSet(
       new URL(`https://${config.auth0.domain}/.well-known/jwks.json`),
     );
@@ -72,7 +75,14 @@ class WebSocketService {
     head: Buffer,
   ): Promise<void> {
     const url = new URL(request.url ?? '/', `http://${request.headers.host}`);
-    const token = url.searchParams.get('token');
+    let token = url.searchParams.get('token');
+    if (!token && request.headers['sec-websocket-protocol']) {
+      const protocols = request.headers['sec-websocket-protocol'].split(',').map(p => p.trim());
+      const idx = protocols.indexOf('access_token');
+      if (idx !== -1 && protocols.length > idx + 1) {
+        token = protocols[idx + 1];
+      }
+    }
     if (!token) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
 
     try {
@@ -83,10 +93,9 @@ class WebSocketService {
 
       // Prefer a custom `userId` claim if configured in Auth0; otherwise resolve
       // the internal user by `sub` (Auth0 user_id).
-      let userId = parseInt(
-        (payload as any).userId ?? (payload as any)['https://soulseer.com/userId'] ?? '0',
-        10,
-      );
+      const rawUserId = (payload as any).userId ?? (payload as any)['https://soulseer.com/userId'];
+      let userId = typeof rawUserId === 'number' ? rawUserId : parseInt(String(rawUserId || ''), 10);
+      if (!Number.isFinite(userId) || userId <= 0) userId = 0;
       if (!userId && payload.sub) {
         const db = getDb();
         const [user] = await db
@@ -132,7 +141,9 @@ class WebSocketService {
       try {
         const msg = JSON.parse(data.toString());
         if (msg.type === 'ping') ws.send(JSON.stringify({ type: 'pong', payload: {} }));
-      } catch { /* ignore */ }
+      } catch (err) {
+        logger.debug({ userId: ws.userId, err }, 'Failed to parse WebSocket message');
+      }
     });
     ws.on('close', () => this.removeClient(ws));
     ws.on('error', (err) => { logger.error({ userId: ws.userId, err }, 'WebSocket error'); this.removeClient(ws); });

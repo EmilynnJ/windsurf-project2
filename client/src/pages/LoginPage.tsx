@@ -69,6 +69,7 @@ export function LoginPage() {
                 // drop the spinner so the user can retry instead of being
                 // stuck forever.
                 setClicked(false);
+                console.warn('[LoginPage] login redirect failed:', err);
               }
             }}
           >

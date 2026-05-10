@@ -43,8 +43,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(userData);
         setAuthError(null);
         return;
-      } catch {
+      } catch (meErr) {
         // User not found or /me failed — fall through to sync/create.
+        console.warn('[AuthContext] /me fetch failed, falling back to sync:', meErr);
       }
 
       // Sync user with backend (creates or updates the user record).

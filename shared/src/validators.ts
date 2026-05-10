@@ -14,7 +14,7 @@ export const paginationSchema = z.object({
 
 export const userRoleSchema = z.enum(["client", "reader", "admin"]);
 export const readingTypeSchema = z.enum(["chat", "voice", "video"]);
-export const readingStatusSchema = z.enum(["pending", "accepted", "in_progress", "active", "paused", "completed", "cancelled", "missed", "disputed"]);
+export const readingStatusSchema = z.enum(["pending", "accepted", "in_progress", "active", "paused", "completed", "cancelled", "missed"]);
 export const paymentStatusSchema = z.enum(["pending", "paid", "refunded"]);
 export const transactionTypeSchema = z.enum(["topup", "reading_charge", "reader_payout", "refund", "admin_adjustment"]);
 export const forumCategorySchema = z.enum(["General", "Readings", "Spiritual Growth", "Ask a Reader", "Announcements"]);
@@ -135,7 +135,7 @@ export const readerFilterSchema = z.object({
   limit: z.coerce.number().int().positive().max(50).default(12),
   specialty: z.string().max(100).optional(),
   type: readingTypeSchema.optional(),
-  online: z.string().transform(v => v === "true").optional(),
+  online: z.string().transform(v => v === "true" ? true : v === "false" ? false : undefined).optional(),
 });
 
 export const forumFilterSchema = z.object({

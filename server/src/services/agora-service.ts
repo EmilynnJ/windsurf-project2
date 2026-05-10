@@ -11,7 +11,7 @@ export class AgoraService {
     if (!config.agora.appId || !config.agora.appCertificate) {
       throw new AppError(500, 'Agora credentials not configured');
     }
-    if (!channelName || !channelName.startsWith('reading_')) {
+    if (!channelName || !/^reading_[0-9a-zA-Z_]+$/.test(channelName)) {
       throw new AppError(400, 'Invalid channel name');
     }
 

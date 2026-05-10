@@ -199,6 +199,7 @@ export const transactions = pgTable(
     userIdIdx: index("transactions_user_id_idx").on(table.userId),
     readingIdIdx: index("transactions_reading_id_idx").on(table.readingId),
     typeIdx: index("transactions_type_idx").on(table.type),
+    stripePaymentIntentIdUniqueIdx: uniqueIndex("transactions_stripe_pi_idx").on(table.stripePaymentIntentId),
   }),
 );
 

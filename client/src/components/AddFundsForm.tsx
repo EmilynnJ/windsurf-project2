@@ -137,7 +137,7 @@ function CardStep({ amountCents, onSuccess, onCancel }: CardStepProps) {
             'info',
             'Payment is processing. Your balance will update once Stripe confirms.',
           );
-          onSuccess(amountCents);
+          onSuccess(0); // Pass 0 to close dialog without adding balance
           return;
         }
 
@@ -193,7 +193,7 @@ export function AddFundsForm({ onSuccess, onCancel }: AddFundsFormProps) {
   const [amountCents, setAmountCents] = useState<number | null>(null);
   const [creatingIntent, setCreatingIntent] = useState(false);
 
-  const effectiveDollars = selectedAmount ?? parseFloat(customAmount);
+  const effectiveDollars = selectedAmount ?? (customAmount.trim() ? parseFloat(customAmount) : NaN);
   const canContinue =
     Number.isFinite(effectiveDollars) && effectiveDollars >= MIN_AMOUNT;
 

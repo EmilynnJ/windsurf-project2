@@ -125,10 +125,10 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const url = `${base}/ws?token=${encodeURIComponent(token)}`;
+    const url = `${base}/ws`;
     let ws: WebSocket;
     try {
-      ws = new WebSocket(url);
+      ws = new WebSocket(url, ['access_token', token]);
     } catch (err) {
       console.warn('[ws] failed to construct WebSocket', err);
       scheduleReconnect();

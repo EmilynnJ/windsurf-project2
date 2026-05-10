@@ -171,6 +171,19 @@ function ReaderApplicationForm() {
       e.preventDefault();
       setError('');
 
+      // ── Client-side validation for required fields ──
+      const trimmedName = form.fullName.trim();
+      const trimmedEmail = form.email.trim();
+      if (!trimmedName) { setError('Full name is required.'); return; }
+      if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+        setError('A valid email address is required.');
+        return;
+      }
+      if (!form.yearsExperience.trim()) { setError('Years of experience is required.'); return; }
+      if (!form.specialties.trim()) { setError('Specialties are required.'); return; }
+      if (!form.bio.trim()) { setError('A bio is required.'); return; }
+      if (!form.whySoulSeer.trim()) { setError('Please tell us why you want to join SoulSeer.'); return; }
+
       const selectedTypes = (Object.entries(form.readingTypes) as [ReadingType, boolean][])
         .filter(([, v]) => v)
         .map(([k]) => k);
@@ -191,11 +204,19 @@ function ReaderApplicationForm() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ...form, readingTypes: selectedTypes }),
         });
-        if (!res.ok) throw new Error('Server error');
+        if (!res.ok) {
+          let serverMessage = 'Server error';
+          try {
+            const data = await res.json();
+            serverMessage = data.error || data.message || serverMessage;
+          } catch { /* response wasn't JSON */ }
+          throw new Error(serverMessage);
+        }
         setSubmitted(true);
-      } catch {
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
         setError(
-          'Submission failed. Please email your application directly to apply@soulseer.app'
+          `Submission failed: ${message}. Please email your application directly to apply@soulseer.app`
         );
       } finally {
         setSubmitting(false);
@@ -443,7 +464,6 @@ function ReaderApplicationForm() {
 export function HelpPage() {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   const [showAppForm, setShowAppForm] = useState(false);
-  const { addToast } = useToast();
 
   const toggleItem = useCallback((index: number) => {
     setOpenIndex((prev) => (prev === index ? null : index));
@@ -515,9 +535,7 @@ export function HelpPage() {
                 <span className="legal-card__icon" aria-hidden="true">{doc.icon}</span>
                 <h3 className="legal-card__title">{doc.title}</h3>
                 <p className="legal-card__desc">{doc.description}</p>
-                {doc.href === '#' ? (
-                  <span className="legal-card__coming-soon">Coming Soon</span>
-                ) : 'internal' in doc && doc.internal ? (
+                {'internal' in doc && doc.internal ? (
                   <Link
                     to={doc.href}
                     className="btn btn--sm btn--secondary"
