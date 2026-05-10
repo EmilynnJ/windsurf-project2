@@ -1,17 +1,25 @@
 import { useAuth } from '../../hooks/useAuth';
 import { LoadingPage, Button } from '../../components/ui';
 import { Navigate } from 'react-router-dom';
+import { dashboardPathForRole } from '../../lib/dashboardRoute';
 
 export function DashboardPage() {
   const {
     user,
     isAuthenticated,
     isAuth0Authenticated,
+    auth0Role,
     isLoading,
     authError,
     refreshUser,
     logout,
   } = useAuth();
+
+  // Instant redirect off the Auth0 role claim — runs before /me settles, so
+  // the user lands on the right dashboard URL without a loading flash.
+  if (isAuth0Authenticated && auth0Role) {
+    return <Navigate to={dashboardPathForRole(auth0Role)} replace />;
+  }
 
   if (isLoading) {
     return <LoadingPage message="Preparing your dashboard..." />;
@@ -59,11 +67,5 @@ export function DashboardPage() {
 
   // Redirect to the role-specific dashboard URL so deep-links and shared URLs
   // resolve cleanly. RoleRoute on the destination handles guarding.
-  const target =
-    user.role === 'admin'
-      ? '/dashboard/admin'
-      : user.role === 'reader'
-        ? '/dashboard/reader'
-        : '/dashboard/client';
-  return <Navigate to={target} replace />;
+  return <Navigate to={dashboardPathForRole(user.role)} replace />;
 }

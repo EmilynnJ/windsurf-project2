@@ -500,6 +500,52 @@ a:focus-visible {
   white-space: nowrap;
 }
 
+.nav__balance {
+  font-family: var(--font-body);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #D4AF37;
+  border: 1px solid rgba(212, 175, 55, 0.45);
+  background: rgba(212, 175, 55, 0.08);
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.65rem;
+  white-space: nowrap;
+}
+
+.nav__mobile-balance {
+  margin: 0.5rem 0 0;
+  font-family: var(--font-body);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #D4AF37;
+}
+
+.nav__auth-error {
+  background: rgba(255, 105, 180, 0.18);
+  color: #ffffff;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  text-align: center;
+  border-bottom: 1px solid rgba(255, 105, 180, 0.45);
+}
+
+.nav__auth-error-btn {
+  margin-left: 0.5rem;
+  background: transparent;
+  color: #FF69B4;
+  border: 1px solid #FF69B4;
+  border-radius: 4px;
+  padding: 0.15rem 0.6rem;
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+}
+.nav__auth-error-btn:hover {
+  background: rgba(255, 105, 180, 0.12);
+}
+
 /* Mobile hamburger */
 .nav__toggle {
   display: none;
