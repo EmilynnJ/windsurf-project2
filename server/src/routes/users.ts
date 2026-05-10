@@ -334,7 +334,7 @@ router.delete("/me", requireAuth, async (req, res, next) => {
       .where(
         and(
           or(eq(readings.clientId, userId), eq(readings.readerId, userId)),
-          inArray(readings.status, ["pending", "accepted", "in_progress", "active", "paused"] as const),
+          inArray(readings.status, ["pending", "accepted", "active", "paused"] as const),
         ),
       )
       .limit(1);
@@ -419,7 +419,7 @@ router.patch("/me/online", requireAuth, async (req, res, next) => {
   }
 });
 
-router.patch("/me/pricing", requireAuth, async (req, res, next) => {
+router.patch("/me/pricing", requireAuth, validateBody(pricingSchema), async (req, res, next) => {
   try {
     const db = getDb();
     if (req.user!.role !== "reader") {
@@ -427,28 +427,9 @@ router.patch("/me/pricing", requireAuth, async (req, res, next) => {
       return;
     }
     const updates: Record<string, any> = {};
-    const maxPricingCents = 100_000;
-    if (
-      typeof req.body.pricingChat === "number" &&
-      Number.isSafeInteger(req.body.pricingChat) &&
-      req.body.pricingChat >= 0 &&
-      req.body.pricingChat <= maxPricingCents
-    )
-      updates.pricingChat = req.body.pricingChat;
-    if (
-      typeof req.body.pricingVoice === "number" &&
-      Number.isSafeInteger(req.body.pricingVoice) &&
-      req.body.pricingVoice >= 0 &&
-      req.body.pricingVoice <= maxPricingCents
-    )
-      updates.pricingVoice = req.body.pricingVoice;
-    if (
-      typeof req.body.pricingVideo === "number" &&
-      Number.isSafeInteger(req.body.pricingVideo) &&
-      req.body.pricingVideo >= 0 &&
-      req.body.pricingVideo <= maxPricingCents
-    )
-      updates.pricingVideo = req.body.pricingVideo;
+    if (req.body.pricingChat !== undefined) updates.pricingChat = req.body.pricingChat;
+    if (req.body.pricingVoice !== undefined) updates.pricingVoice = req.body.pricingVoice;
+    if (req.body.pricingVideo !== undefined) updates.pricingVideo = req.body.pricingVideo;
 
     if (!Object.keys(updates).length) {
       res.status(400).json({ error: "No pricing fields" });

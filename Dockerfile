@@ -27,6 +27,10 @@ RUN npm run build
 # Stage 2: Production
 FROM node:20-slim AS production
 
+# Create non-root user for security
+RUN groupadd -g 1001 nodejs && \
+    useradd -u 1001 -g nodejs -s /bin/sh -m nodejs
+
 WORKDIR /app
 
 # Set production environment
@@ -34,26 +38,18 @@ ENV NODE_ENV=production
 ENV PORT=8080
 
 # Copy package files
-COPY package*.json ./
-COPY shared/package*.json ./shared/
-COPY client/package*.json ./client/
-COPY server/package*.json ./server/
+COPY --chown=nodejs:nodejs package*.json ./
+COPY --chown=nodejs:nodejs shared/package*.json ./shared/
+COPY --chown=nodejs:nodejs client/package*.json ./client/
+COPY --chown=nodejs:nodejs server/package*.json ./server/
 
 # Install only production dependencies
 RUN npm install --omit=dev
 
 # Copy built files from builder
-COPY --from=builder /app/shared/dist ./shared/dist
-COPY --from=builder /app/client/dist ./client/dist
-COPY --from=builder /app/server/dist ./server/dist
-COPY --from=builder /app/drizzle.config.ts ./
-
-# Create non-root user for security
-RUN groupadd -g 1001 nodejs && \
-    useradd -u 1001 -g nodejs -s /bin/sh -m nodejs
-
-# Change ownership
-RUN chown -R nodejs:nodejs /app
+COPY --chown=nodejs:nodejs --from=builder /app/shared/dist ./shared/dist
+COPY --chown=nodejs:nodejs --from=builder /app/client/dist ./client/dist
+COPY --chown=nodejs:nodejs --from=builder /app/server/dist ./server/dist
 
 USER nodejs
 

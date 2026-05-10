@@ -24,6 +24,7 @@ export interface User {
 
 export interface AuthState {
   user: User | null;
+  hasSession: boolean;
   isAuthenticated: boolean;
   isLoading: boolean;
   login: () => Promise<void>;
@@ -56,6 +57,12 @@ export type ReadingType = 'chat' | 'voice' | 'video';
 export type ReadingStatus = 'pending' | 'accepted' | 'in_progress' | 'active' | 'paused' | 'completed' | 'cancelled' | 'missed';
 export type PaymentStatus = 'pending' | 'paid' | 'refunded';
 
+export interface ChatMessage {
+  senderId: number;
+  content: string;
+  timestamp: number;
+}
+
 export interface Reading {
   id: number;
   clientId: number;
@@ -73,7 +80,7 @@ export interface Reading {
   agoraChannel?: string;
   agoraToken?: string;
   paymentStatus: PaymentStatus;
-  chatTranscript?: any[];
+  chatTranscript?: ChatMessage[];
   rating?: number;
   review?: string;
   startedAt?: string;

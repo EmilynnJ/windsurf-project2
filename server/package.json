@@ -18,6 +18,7 @@
   "dependencies": {
     "@neondatabase/serverless": "^0.10.4",
     "@soulseer/shared": "file:../shared",
+    "@vercel/node": "4.0.0",
     "agora-token": "^2.0.5",
     "auth0": "^5.7.0",
     "cloudinary": "^2.5.1",
@@ -42,7 +43,7 @@
     "@types/multer": "^1.4.12",
     "@types/ws": "^8.5.14",
     "@vitest/coverage-v8": "^4.1.0",
-    "drizzle-kit": "^0.31.9",
+    "drizzle-kit": "^0.18.1",
     "tsx": "^4.20.5",
     "typescript": "^5.7.3",
     "vitest": "^4.1.0"

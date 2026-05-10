@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { eq, desc, sql, and, count } from "drizzle-orm";
+import { eq, desc, sql, and, count, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db/db";
 import { users, forumPosts, forumComments, forumFlags } from "../db/schema";
@@ -33,7 +33,7 @@ router.get("/posts", async (req, res, next) => {
     let commentCounts: Record<number, number> = {};
     if (postIds.length > 0) {
       const counts = await db.select({ postId: forumComments.postId, count: count() })
-        .from(forumComments).where(sql`${forumComments.postId} = ANY(${postIds})`)
+        .from(forumComments).where(inArray(forumComments.postId, postIds))
         .groupBy(forumComments.postId);
       for (const c of counts) commentCounts[c.postId] = Number(c.count);
     }

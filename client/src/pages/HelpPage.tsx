@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '../components/ui';
+import { useToast } from '../components/ToastProvider';
 
 /* ── Legal Policy Links ─────────────────────────────────────────
    Update each `href` with your Termly-generated document URL.
@@ -17,31 +18,31 @@ const LEGAL_LINKS = [
     icon: '📜',
     title: 'Terms of Service',
     description: 'The rules and guidelines for using the SoulSeer platform as a client or reader.',
-    href: '#', // TODO: replace with Termly Terms of Service URL
+    href: '/legal/terms',
   },
   {
     icon: '🍪',
     title: 'Cookie Policy',
     description: 'Information about cookies we use, why we use them, and how to manage them.',
-    href: '#', // TODO: replace with Termly Cookie Policy URL
+    href: '/legal/cookie-policy',
   },
   {
     icon: '💰',
     title: 'Refund Policy',
     description: 'Our policy on refunds, account credits, and resolution of session disputes.',
-    href: '#', // TODO: replace with Termly Refund Policy URL
+    href: '/legal/refund-policy',
   },
   {
     icon: '🤝',
     title: 'Reader Agreement',
     description: 'Terms, responsibilities, and guidelines for SoulSeer readers and practitioners.',
-    href: '#', // TODO: replace with Termly Reader Agreement URL
+    href: '/legal/reader-agreement',
   },
   {
     icon: '⚖️',
     title: 'Disclaimer',
     description: 'Important disclaimers about the nature of psychic readings and entertainment purposes.',
-    href: '#', // TODO: replace with Termly Disclaimer URL
+    href: '/legal/disclaimer',
   },
 ] as const;
 
@@ -170,6 +171,19 @@ function ReaderApplicationForm() {
       e.preventDefault();
       setError('');
 
+      // ── Client-side validation for required fields ──
+      const trimmedName = form.fullName.trim();
+      const trimmedEmail = form.email.trim();
+      if (!trimmedName) { setError('Full name is required.'); return; }
+      if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+        setError('A valid email address is required.');
+        return;
+      }
+      if (!form.yearsExperience.trim()) { setError('Years of experience is required.'); return; }
+      if (!form.specialties.trim()) { setError('Specialties are required.'); return; }
+      if (!form.bio.trim()) { setError('A bio is required.'); return; }
+      if (!form.whySoulSeer.trim()) { setError('Please tell us why you want to join SoulSeer.'); return; }
+
       const selectedTypes = (Object.entries(form.readingTypes) as [ReadingType, boolean][])
         .filter(([, v]) => v)
         .map(([k]) => k);
@@ -190,11 +204,19 @@ function ReaderApplicationForm() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ...form, readingTypes: selectedTypes }),
         });
-        if (!res.ok) throw new Error('Server error');
+        if (!res.ok) {
+          let serverMessage = 'Server error';
+          try {
+            const data = await res.json();
+            serverMessage = data.error || data.message || serverMessage;
+          } catch { /* response wasn't JSON */ }
+          throw new Error(serverMessage);
+        }
         setSubmitted(true);
-      } catch {
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
         setError(
-          'Submission failed. Please email your application directly to apply@soulseer.app'
+          `Submission failed: ${message}. Please email your application directly to apply@soulseer.app`
         );
       } finally {
         setSubmitting(false);
@@ -412,11 +434,11 @@ function ReaderApplicationForm() {
         />
         <span>
           I have read and agree to the{' '}
-          <a href="#legal" onClick={(e) => e.stopPropagation()}>
+          <a href="/legal/reader-agreement">
             Reader Agreement
           </a>{' '}
           and{' '}
-          <a href="#legal" onClick={(e) => e.stopPropagation()}>
+          <a href="/legal/terms">
             Terms of Service
           </a>
           .
@@ -513,9 +535,7 @@ export function HelpPage() {
                 <span className="legal-card__icon" aria-hidden="true">{doc.icon}</span>
                 <h3 className="legal-card__title">{doc.title}</h3>
                 <p className="legal-card__desc">{doc.description}</p>
-                {doc.href === '#' ? (
-                  <span className="legal-card__coming-soon">Coming Soon</span>
-                ) : 'internal' in doc && doc.internal ? (
+                {'internal' in doc && doc.internal ? (
                   <Link
                     to={doc.href}
                     className="btn btn--sm btn--secondary"
@@ -589,16 +609,11 @@ export function HelpPage() {
                 </p>
               </div>
               <a
-                href="#" /* TODO: Replace with your hosted PDF URL (Google Drive, Dropbox, etc.) */
+                href="/docs/reader-application.pdf"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="btn btn--secondary"
                 aria-label="Download Reader Application PDF"
-                onClick={(e) => {
-                  // Remove this handler once you have a real PDF URL
-                  e.preventDefault();
-                  alert('PDF coming soon! Please use the online form below or email apply@soulseer.app');
-                }}
               >
                 Download PDF
               </a>

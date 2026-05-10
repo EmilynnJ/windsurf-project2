@@ -11,8 +11,8 @@ export async function resolveUser(
   next: NextFunction,
 ): Promise<void> {
   try {
-    const auth0Id = req.auth?.payload?.sub ?? (req.auth as any)?.sub;
-    if (!auth0Id) {
+    const auth0Id = req.auth?.payload?.sub;
+    if (typeof auth0Id !== 'string') {
       res.status(401).json({ error: 'Missing authentication subject' });
       return;
     }
@@ -20,7 +20,7 @@ export async function resolveUser(
     const [user] = await db
       .select()
       .from(users)
-      .where(eq(users.auth0Id, auth0Id as string))
+      .where(eq(users.auth0Id, auth0Id))
       .limit(1);
     if (!user) {
       res.status(401).json({ error: 'User not found. Please sync your account first.' });
@@ -54,7 +54,8 @@ export async function requireParticipant(
   next: NextFunction,
 ): Promise<void> {
   try {
-    const readingId = parseInt(req.params.id ?? '', 10);
+    const idParam = req.params.id;
+    const readingId = typeof idParam === 'string' ? parseInt(idParam, 10) : NaN;
     if (isNaN(readingId)) {
       res.status(400).json({ error: 'Invalid reading ID' });
       return;

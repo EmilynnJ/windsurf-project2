@@ -12,7 +12,7 @@ function pickAuth0Env() {
     env.AUTH0_DOMAIN_URL ||
     env.AUTH0_ISSUER_BASE_URL ||
     '';
-  const domain = rawDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const domain = rawDomain;
   // Audience must match the API Identifier the SPA requests tokens for.
   // Fall back to the Management API audience for the tenant if nothing else
   // is set — this keeps prod from crashing while the API is being created.
@@ -25,8 +25,7 @@ function pickAuth0Env() {
     env.AUTH0_MGMT_CLIENT_SECRET || env.AUTH0_CLIENT_SECRET || '';
   // If CORS_ORIGIN is unset/localhost in production, fall back to the
   // configured Auth0 allowed URL so the deployed frontend can call the API.
-  const allowedUrl =
-    (env.AUTH0_ALLOWED_URL || env.AUTH0_BASE_URL || '').replace(/\/$/, '');
+  const allowedUrl = env.AUTH0_ALLOWED_URL || env.AUTH0_BASE_URL || '';
   if (allowedUrl && (!env.CORS_ORIGIN || env.CORS_ORIGIN.includes('localhost'))) {
     env.CORS_ORIGIN = env.CORS_ORIGIN
       ? `${env.CORS_ORIGIN},${allowedUrl}`
@@ -86,8 +85,7 @@ function loadConfig() {
     const formatted = parsed.error.issues
       .map((i) => `  ${i.path.join('.')}: ${i.message}`)
       .join('\n');
-    console.error(`\n❌ Invalid environment variables:\n${formatted}\n`);
-    process.exit(1);
+    throw new Error(`Invalid environment variables:\n${formatted}`);
   }
   return parsed.data;
 }

@@ -17,6 +17,9 @@ import readingRoutes from './routes/readings';
 import paymentRoutes from './routes/payments';
 import forumRoutes from './routes/forum';
 import adminRoutes from './routes/admin';
+import applicationRoutes from './routes/applications';
+import newsletterRoutes from './routes/newsletter';
+import webhookRoutes from './routes/webhooks';
 
 const app = express();
 
@@ -32,7 +35,7 @@ app.use(generalLimiter);
 
 // JSON parsing — skip for Stripe webhook (needs raw body)
 app.use((req, res, next) => {
-  if (req.path === '/api/payments/webhook') return next();
+  if (req.path === '/api/payments/webhook' || req.path === '/api/webhooks/stripe') return next();
   express.json({ limit: '2mb' })(req, res, next);
 });
 app.use(express.urlencoded({ extended: false }));
@@ -54,6 +57,9 @@ app.use('/api/readings', readingRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/forum', forumRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/reader-applications', applicationRoutes);
+app.use('/api/newsletter', newsletterRoutes);
+app.use('/api/webhooks', webhookRoutes);
 
 // Serve static files from client/dist
 const clientPath = path.join(__dirname, '../../client/dist');

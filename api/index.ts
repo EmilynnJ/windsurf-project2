@@ -10,39 +10,45 @@
  * live reader status when WS is unavailable.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+// @ts-ignore — compiled JS imports from server/dist
 import express from 'express';
+// @ts-ignore
 import helmet from 'helmet';
+// @ts-ignore
 import cors from 'cors';
 
 // Static imports from compiled server output. Requires `npm run build -w shared`
 // and `npm run build -w server` to have run first (handled by the root
 // "build" script, which Vercel executes per vercel.json).
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { config } = require('../server/dist/src/config.js');
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { generalLimiter, webhookLimiter } = require('../server/dist/src/middleware/rate-limit.js');
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { globalErrorHandler } = require('../server/dist/src/middleware/error-handler.js');
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const authRoutes = require('../server/dist/src/routes/auth.js').default;
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const userRoutes = require('../server/dist/src/routes/users.js').default;
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const readingRoutes = require('../server/dist/src/routes/readings.js').default;
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const paymentRoutes = require('../server/dist/src/routes/payments.js').default;
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const forumRoutes = require('../server/dist/src/routes/forum.js').default;
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const adminRoutes = require('../server/dist/src/routes/admin.js').default;
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const transactionRoutes = require('../server/dist/src/routes/transactions.js').default;
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const webhookRoutes = require('../server/dist/src/routes/webhooks.js').default;
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const applicationRoutes = require('../server/dist/src/routes/applications.js').default;
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const newsletterRoutes = require('../server/dist/src/routes/newsletter.js').default;
+// @ts-ignore
+import { config } from '../server/dist/src/config.js';
+// @ts-ignore
+import { generalLimiter, webhookLimiter } from '../server/dist/src/middleware/rate-limit.js';
+// @ts-ignore
+import { globalErrorHandler } from '../server/dist/src/middleware/error-handler.js';
+// @ts-ignore
+import authRoutes from '../server/dist/src/routes/auth.js';
+// @ts-ignore
+import userRoutes from '../server/dist/src/routes/users.js';
+// @ts-ignore
+import readingRoutes from '../server/dist/src/routes/readings.js';
+// @ts-ignore
+import paymentRoutes from '../server/dist/src/routes/payments.js';
+// @ts-ignore
+import forumRoutes from '../server/dist/src/routes/forum.js';
+// @ts-ignore
+import adminRoutes from '../server/dist/src/routes/admin.js';
+// @ts-ignore
+import transactionRoutes from '../server/dist/src/routes/transactions.js';
+// @ts-ignore
+import webhookRoutes from '../server/dist/src/routes/webhooks.js';
+// @ts-ignore
+import applicationRoutes from '../server/dist/src/routes/applications.js';
+// @ts-ignore
+import newsletterRoutes from '../server/dist/src/routes/newsletter.js';
+
+/** Paths that require raw body (Stripe signature verification). */
+const RAW_BODY_PATHS = new Set(['/api/payments/webhook', '/api/webhooks/stripe']);
 
 let app: express.Application | null = null;
 
@@ -51,12 +57,7 @@ function createApp() {
 
   app = express();
 
-  app.use(
-    helmet({
-      contentSecurityPolicy: false,
-      crossOriginEmbedderPolicy: false,
-    }),
-  );
+  app.use(helmet());
 
   app.use(
     cors({
@@ -67,22 +68,31 @@ function createApp() {
     }),
   );
 
-  app.use(generalLimiter);
-
-  // Stripe webhook paths must use the raw body — mount rate limiter before JSON.
-  app.use('/api/payments/webhook', webhookLimiter);
-  app.use('/api/webhooks/stripe', webhookLimiter);
-
-  // JSON parsing for everything except Stripe webhook (signature needs raw body)
-  app.use((req, res, next) => {
-    if (req.path === '/api/payments/webhook' || req.path === '/api/webhooks/stripe') {
-      return next();
-    }
+  // ── Body parsing (applied BEFORE rate limiter to avoid wasted CPU on
+  // rate-limited requests, and to keep raw body intact for Stripe webhooks).
+  // Stripe webhook paths use express.raw() so they can verify the signature.
+  app.use(RAW_BODY_PATHS.has.bind(RAW_BODY_PATHS) as never); // no-op guard
+  for (const rawPath of RAW_BODY_PATHS) {
+    app.use(rawPath, express.raw({ type: 'application/json' }));
+  }
+  // JSON + URL-encoded for everything else, applied globally so routes never
+  // miss parsing. The order matters: raw routes are already matched above.
+  app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (RAW_BODY_PATHS.has(req.path)) return next();
     express.json({ limit: '2mb' })(req, res, next);
   });
-  app.use(express.urlencoded({ extended: false }));
+  app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (RAW_BODY_PATHS.has(req.path)) return next();
+    express.urlencoded({ extended: false })(req, res, next);
+  });
 
-  app.get('/api/health', (_req, res) => {
+  // ── Rate limiting
+  app.use(generalLimiter);
+  for (const rawPath of RAW_BODY_PATHS) {
+    app.use(rawPath, webhookLimiter);
+  }
+
+  app.get('/api/health', (_req: express.Request, res: express.Response) => {
     res.json({
       ok: true,
       timestamp: new Date().toISOString(),
@@ -101,7 +111,7 @@ function createApp() {
   app.use('/api/reader-applications', applicationRoutes);
   app.use('/api', transactionRoutes);
 
-  app.use((_req, res) => {
+  app.use((_req: express.Request, res: express.Response) => {
     res.status(404).json({ error: 'Not found' });
   });
 
@@ -115,12 +125,14 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     const expressApp = createApp();
     return expressApp(req as unknown as express.Request, res as unknown as express.Response);
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
+    console.error('[api] createApp failed:', stack ?? message);
     // Surface boot errors as 500 JSON instead of a generic crash so the client
     // can show a useful error.
-    console.error('[api] createApp failed:', err);
     res.status(500).json({
       error: 'API boot failure',
-      message: err instanceof Error ? err.message : String(err),
+      message,
     });
     return;
   }

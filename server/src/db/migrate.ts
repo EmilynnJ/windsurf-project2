@@ -3,11 +3,12 @@ import pkg from "pg";
 const { Pool } = pkg;
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { config } from "../config";
 
 async function runMigrations() {
   const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false },
+    connectionString: config.database.url,
+    ssl: true,
   });
   const db = drizzle(pool);
 

@@ -1,4 +1,4 @@
-import { eq, and, lt, sql, inArray } from "drizzle-orm";
+import { eq, and, lt, sql, inArray, isNotNull } from "drizzle-orm";
 import { getDb } from "../db/db";
 import { users, readings, transactions } from "../db/schema";
 import { wsService } from "./websocket-service";
@@ -34,7 +34,11 @@ class BillingService {
         .select()
         .from(readings)
         .where(
-          and(eq(readings.status, "active"), lt(readings.lastHeartbeat, graceCutoff)),
+          and(
+            eq(readings.status, "active"),
+            isNotNull(readings.lastHeartbeat),
+            lt(readings.lastHeartbeat, graceCutoff),
+          ),
         );
 
       for (const reading of stale) {
@@ -239,7 +243,7 @@ class BillingService {
 
   /**
    * Called when a reader toggles offline or their socket closes mid-session.
-   * Pauses all active/accepted/in_progress readings for that reader and
+   * Pauses all active/accepted readings for that reader and
    * notifies both participants. Billing ticks skip any non-active status so
    * charging stops immediately. Clients can then choose to end the session
    * or wait for the reader to come back online.
@@ -254,7 +258,7 @@ class BillingService {
       .where(
         and(
           eq(readings.readerId, readerId),
-          inArray(readings.status, ["accepted", "in_progress", "active"] as const),
+          inArray(readings.status, ["accepted", "active"] as const),
         ),
       );
 

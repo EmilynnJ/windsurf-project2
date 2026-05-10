@@ -1,4 +1,4 @@
-import type { HTMLAttributes } from 'react';
+import { useState, type HTMLAttributes } from 'react';
 
 type AvatarSize = 'sm' | 'md' | 'lg' | 'xl';
 
@@ -24,26 +24,17 @@ function Avatar({
   className = '',
   ...props
 }: AvatarProps) {
+  const [imageError, setImageError] = useState(false);
   const classes = [`avatar avatar--${size}`, className].filter(Boolean).join(' ');
 
   return (
     <div className={classes} {...props}>
-      {src ? (
+      {src && !imageError ? (
         <img
           src={src}
           alt={alt || name || 'Avatar'}
           loading="lazy"
-          onError={(e) => {
-            // Hide broken image, show fallback
-            (e.target as HTMLImageElement).style.display = 'none';
-            const parent = (e.target as HTMLImageElement).parentElement;
-            if (parent) {
-              const fallback = document.createElement('span');
-              fallback.className = 'avatar__fallback';
-              fallback.textContent = getInitial(name);
-              parent.appendChild(fallback);
-            }
-          }}
+          onError={() => setImageError(true)}
         />
       ) : (
         <span className="avatar__fallback">{getInitial(name)}</span>

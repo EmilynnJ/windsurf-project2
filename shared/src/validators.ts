@@ -14,10 +14,10 @@ export const paginationSchema = z.object({
 
 export const userRoleSchema = z.enum(["client", "reader", "admin"]);
 export const readingTypeSchema = z.enum(["chat", "voice", "video"]);
-export const readingStatusSchema = z.enum(["pending", "accepted", "in_progress", "completed", "cancelled", "disputed"]);
+export const readingStatusSchema = z.enum(["pending", "accepted", "in_progress", "active", "paused", "completed", "cancelled", "missed"]);
 export const paymentStatusSchema = z.enum(["pending", "paid", "refunded"]);
-export const transactionTypeSchema = z.enum(["top_up", "reading_charge", "reader_credit", "payout", "adjustment", "refund"]);
-export const forumCategorySchema = z.enum(["general", "readings", "spiritual_growth", "ask_a_reader", "announcements"]);
+export const transactionTypeSchema = z.enum(["topup", "reading_charge", "reader_payout", "refund", "admin_adjustment"]);
+export const forumCategorySchema = z.enum(["General", "Readings", "Spiritual Growth", "Ask a Reader", "Announcements"]);
 
 // ─── Auth / User Sync ───────────────────────────────────────────────────────
 
@@ -105,7 +105,7 @@ export const createReaderSchema = z.object({
   username: z.string().min(3).max(50).regex(/^[a-zA-Z0-9_-]+$/),
   fullName: z.string().min(1).max(255),
   bio: z.string().max(2000).optional(),
-  specialties: z.array(z.string().min(1).max(100)).max(20).optional(),
+  specialties: z.string().max(2000).optional(),
   profileImage: z.string().url().max(512).optional(),
   pricingChat: nonNegInt.max(100_000).optional().default(0),
   pricingVoice: nonNegInt.max(100_000).optional().default(0),
@@ -118,7 +118,7 @@ export const updateReaderSchema = z.object({
   username: z.string().min(3).max(50).regex(/^[a-zA-Z0-9_-]+$/).optional(),
   fullName: z.string().min(1).max(255).optional(),
   bio: z.string().max(2000).optional(),
-  specialties: z.array(z.string().min(1).max(100)).max(20).optional(),
+  specialties: z.string().max(2000).optional(),
   profileImage: z.string().url().max(512).optional(),
   pricingChat: nonNegInt.max(100_000).optional(),
   pricingVoice: nonNegInt.max(100_000).optional(),
@@ -135,7 +135,7 @@ export const readerFilterSchema = z.object({
   limit: z.coerce.number().int().positive().max(50).default(12),
   specialty: z.string().max(100).optional(),
   type: readingTypeSchema.optional(),
-  online: z.string().transform(v => v === "true").optional(),
+  online: z.string().transform(v => v === "true" ? true : v === "false" ? false : undefined).optional(),
 });
 
 export const forumFilterSchema = z.object({

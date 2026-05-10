@@ -257,10 +257,9 @@ router.post(
         return;
       }
 
-      // Only allow token generation for accepted or in_progress readings
+      // Only allow token generation for accepted or active readings
       if (
         reading.status !== "accepted" &&
-        reading.status !== "in_progress" &&
         reading.status !== "active"
       ) {
         res.status(409).json({ error: "Reading is not in a joinable state" });
@@ -296,7 +295,7 @@ router.post(
       const reading = req.reading!;
 
       // Only start billing if reading is in accepted state
-      if (reading.status !== "accepted" && reading.status !== "in_progress") {
+      if (reading.status !== "accepted") {
         // If already active, just acknowledge
         if (reading.status === "active") {
           res.json({ message: "Billing already started", readingId: reading.id });
@@ -379,7 +378,6 @@ router.post(
       if (
         reading.status !== "active" &&
         reading.status !== "paused" &&
-        reading.status !== "in_progress" &&
         reading.status !== "accepted"
       ) {
         res.status(409).json({ error: "Reading is not active" });
@@ -608,7 +606,7 @@ router.post(
         return;
       }
 
-      if (reading.status !== "active" && reading.status !== "in_progress") {
+      if (reading.status !== "active") {
         res.status(409).json({ error: "Reading is not active" });
         return;
       }

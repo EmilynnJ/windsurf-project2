@@ -125,10 +125,10 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const url = `${base}/ws?token=${encodeURIComponent(token)}`;
+    const url = `${base}/ws`;
     let ws: WebSocket;
     try {
-      ws = new WebSocket(url);
+      ws = new WebSocket(url, ['access_token', token]);
     } catch (err) {
       console.warn('[ws] failed to construct WebSocket', err);
       scheduleReconnect();
@@ -153,8 +153,8 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
         if (!msg?.type) return;
         if (msg.type === 'pong') return;
         dispatch(msg.type, msg.payload);
-      } catch {
-        /* ignore */
+      } catch (err) {
+        console.debug('[ws] failed to parse message', err);
       }
     });
 
@@ -171,8 +171,8 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     ws.addEventListener('error', () => {
       try {
         ws.close();
-      } catch {
-        /* ignore */
+      } catch (err) {
+        console.debug('[ws] error during close on error', err);
       }
     });
   }, [getAccessTokenSilently, dispatch]);
@@ -202,8 +202,8 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       if (wsRef.current) {
         try {
           wsRef.current.close();
-        } catch {
-          /* ignore */
+        } catch (err) {
+          console.debug('[ws] error during unmount close', err);
         }
         wsRef.current = null;
       }
@@ -216,8 +216,8 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       if (wsRef.current) {
         try {
           wsRef.current.close();
-        } catch {
-          /* ignore */
+        } catch (err) {
+          console.debug('[ws] error during unmount close', err);
         }
         wsRef.current = null;
       }

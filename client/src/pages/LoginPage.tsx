@@ -8,24 +8,24 @@ import { Button, Spinner } from '../components/ui';
  *
  * Safe login entrypoint.
  *
- *  - If the user is already fully authenticated (Auth0 ok AND internal user
- *    record loaded), redirect straight to /dashboard.
+ *  - If the user already has an Auth0 session, redirect straight to
+ *    /dashboard and let that page finish loading the internal profile.
  *  - Otherwise show a manual "Sign in" button instead of auto-calling
  *    loginWithRedirect(). This prevents an infinite redirect loop when the
  *    backend user sync is failing (e.g. API 500s, network issues, Auth0
  *    audience mismatch): the user would otherwise be bounced back to Auth0
- *    forever because isAuthenticated stays false.
+ *    forever because the internal profile might still be unavailable.
  */
 export function LoginPage() {
-  const { isAuthenticated, isLoading, login } = useAuth();
+  const { hasSession, isLoading, login } = useAuth();
   const navigate = useNavigate();
   const [clicked, setClicked] = useState(false);
 
   useEffect(() => {
-    if (!isLoading && isAuthenticated) {
+    if (!isLoading && hasSession) {
       navigate('/dashboard', { replace: true });
     }
-  }, [isLoading, isAuthenticated, navigate]);
+  }, [hasSession, isLoading, navigate]);
 
   // Show the auto-connecting spinner while Auth0 is processing a callback.
   if (isLoading || clicked) {
@@ -68,8 +68,8 @@ export function LoginPage() {
                 // If Auth0 redirect fails (blocked popup, bad config, offline),
                 // drop the spinner so the user can retry instead of being
                 // stuck forever.
-                console.error('[LoginPage] loginWithRedirect failed:', err);
                 setClicked(false);
+                console.warn('[LoginPage] login redirect failed:', err);
               }
             }}
           >
