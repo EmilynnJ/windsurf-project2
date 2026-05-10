@@ -80,7 +80,7 @@ class WebSocketService {
       const protocols = request.headers['sec-websocket-protocol'].split(',').map(p => p.trim());
       const idx = protocols.indexOf('access_token');
       if (idx !== -1 && protocols.length > idx + 1) {
-        token = protocols[idx + 1];
+        token = protocols[idx + 1] ?? null;
       }
     }
     if (!token) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
