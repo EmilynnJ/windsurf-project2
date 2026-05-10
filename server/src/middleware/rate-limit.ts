@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import { Request, Response, NextFunction } from 'express';
 
 // Simple in-memory rate limiter
@@ -81,3 +82,29 @@ export function messagingRateLimitMiddleware(req: Request, res: Response, next: 
   entry.count++;
   next();
 }
+=======
+import rateLimit from 'express-rate-limit';
+
+export const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' },
+});
+
+export const strictLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' },
+});
+
+export const webhookLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+>>>>>>> b0ebfcb9039e92c09e9e94e90785289e0a1daeb8

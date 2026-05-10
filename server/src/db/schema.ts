@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import {
   boolean,
   integer,
@@ -1171,3 +1172,9 @@ export const schema = {
  * Default export for easy import
  */
 export default schema;
+=======
+// Re-export all schema from the shared package.
+// Uses the @soulseer/shared package name (resolved via npm workspaces)
+// instead of a relative path so compiled JS output is bundler-friendly.
+export * from '@soulseer/shared/schema';
+>>>>>>> b0ebfcb9039e92c09e9e94e90785289e0a1daeb8
