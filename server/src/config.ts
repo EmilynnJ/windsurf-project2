@@ -62,6 +62,10 @@ const envSchema = z.object({
   AUTH0_DB_CONNECTION: z.string().default('Username-Password-Authentication'),
   AGORA_APP_ID: z.string().default(''),
   AGORA_APP_CERTIFICATE: z.string().default(''),
+  AGORA_CUSTOMER_ID: z.string().default(''),
+  AGORA_CUSTOMER_SECRET: z.string().default(''),
+  AGORA_CHAT_APP_ID: z.string().default(''),
+  AGORA_ORG_ID: z.string().default(''),
   STRIPE_SECRET_KEY: z.string().default(''),
   STRIPE_WEBHOOK_SECRET: z.string().default(''),
   // Optional: Cloudinary credentials for reader profile image uploads.
@@ -106,6 +110,10 @@ export const config = {
   agora: {
     appId: env.AGORA_APP_ID,
     appCertificate: env.AGORA_APP_CERTIFICATE,
+    customerId: env.AGORA_CUSTOMER_ID,
+    customerSecret: env.AGORA_CUSTOMER_SECRET,
+    chatAppId: env.AGORA_CHAT_APP_ID,
+    orgId: env.AGORA_ORG_ID,
     tokenExpiration: 3600,
   },
   stripe: {

@@ -17,6 +17,7 @@
  * every method throws a clearly-named error so callers can degrade.
  */
 import { logger } from '../utils/logger';
+import { config } from '../config';
 
 const RTMP_BASE = 'https://api.agora.io/v1/projects';
 
@@ -41,13 +42,13 @@ export interface RtmpStartResult {
 
 class AgoraRtmpService {
   private get appId(): string {
-    return process.env.AGORA_APP_ID ?? '';
+    return config.agora.appId;
   }
   private get customerId(): string {
-    return process.env.AGORA_CUSTOMER_ID ?? '';
+    return config.agora.customerId;
   }
   private get customerSecret(): string {
-    return process.env.AGORA_CUSTOMER_SECRET ?? '';
+    return config.agora.customerSecret;
   }
 
   get enabled(): boolean {
