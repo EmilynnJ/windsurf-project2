@@ -27,6 +27,9 @@ drizzle/meta/
 *.swp
 *.swo
 *~
+*.vibecheck
+*.env
+*.stripe
 
 # OS files
 .DS_Store
