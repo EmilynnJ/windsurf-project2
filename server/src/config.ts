@@ -1,6 +1,56 @@
 import 'dotenv/config';
 import { z } from 'zod';
 
+// Accept Auth0 variable aliases so deployments can use either the canonical
+// AUTH0_DOMAIN/AUTH0_AUDIENCE/AUTH0_MGMT_* names or the names shown in the
+// Auth0 dashboard (AUTH0_DOMAIN_URL, AUTH0_IDENTIFIER, AUTH0_APP_ID,
+// AUTH0_CLIENT_SECRET, AUTH0_ALLOWED_URL).
+function pickAuth0Env() {
+  const env = process.env;
+  const rawDomain =
+    env.AUTH0_DOMAIN ||
+    env.AUTH0_DOMAIN_URL ||
+    env.AUTH0_ISSUER_BASE_URL ||
+    '';
+  const domain = rawDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  // Audience must match the API Identifier the SPA requests tokens for.
+  // Fall back to the Management API audience for the tenant if nothing else
+  // is set — this keeps prod from crashing while the API is being created.
+  const audience =
+    env.AUTH0_AUDIENCE ||
+    env.AUTH0_IDENTIFIER ||
+    (domain ? `https://${domain}/api/v2/` : '');
+  const mgmtClientId = env.AUTH0_MGMT_CLIENT_ID || env.AUTH0_APP_ID || '';
+  const mgmtClientSecret =
+    env.AUTH0_MGMT_CLIENT_SECRET || env.AUTH0_CLIENT_SECRET || '';
+  // If CORS_ORIGIN is unset/localhost in production, fall back to the
+  // configured Auth0 allowed URL so the deployed frontend can call the API.
+  const allowedUrl =
+    (env.AUTH0_ALLOWED_URL || env.AUTH0_BASE_URL || '').replace(/\/$/, '');
+  if (allowedUrl && (!env.CORS_ORIGIN || env.CORS_ORIGIN.includes('localhost'))) {
+    env.CORS_ORIGIN = env.CORS_ORIGIN
+      ? `${env.CORS_ORIGIN},${allowedUrl}`
+      : allowedUrl;
+  }
+  return { domain, audience, mgmtClientId, mgmtClientSecret };
+}
+
+// Database alias: Vercel + Neon integrations often expose the connection string
+// as NEON_DB_CONNECTION_STRING / POSTGRES_URL rather than DATABASE_URL.
+if (!process.env.DATABASE_URL) {
+  process.env.DATABASE_URL =
+    process.env.NEON_DB_CONNECTION_STRING ||
+    process.env.POSTGRES_URL ||
+    process.env.POSTGRES_PRISMA_URL ||
+    '';
+}
+
+const auth0Resolved = pickAuth0Env();
+process.env.AUTH0_DOMAIN = auth0Resolved.domain;
+process.env.AUTH0_AUDIENCE = auth0Resolved.audience;
+process.env.AUTH0_MGMT_CLIENT_ID = auth0Resolved.mgmtClientId;
+process.env.AUTH0_MGMT_CLIENT_SECRET = auth0Resolved.mgmtClientSecret;
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().int().positive().default(5000),

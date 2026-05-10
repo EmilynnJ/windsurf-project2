@@ -65,10 +65,20 @@ function Auth0ProviderWithNavigate({ children }: { children: ReactNode }) {
     .replace(/^https?:\/\//, '')
     .replace(/\/$/, '');
   const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID || '';
+  const audience = import.meta.env.VITE_AUTH0_AUDIENCE || '';
+  const redirectUri = (
+    import.meta.env.VITE_AUTH0_REDIRECT_URI ||
+    (typeof window !== 'undefined' ? window.location.origin : '')
+  ).replace(/\/$/, '');
 
   if (!auth0Domain || !clientId) {
     console.error(
       '[SoulSeer] Auth0 env vars missing. Ensure VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID are set.',
+    );
+  }
+  if (!audience) {
+    console.warn(
+      '[SoulSeer] VITE_AUTH0_AUDIENCE is not set — backend JWT validation will reject tokens.',
     );
   }
 
@@ -82,9 +92,8 @@ function Auth0ProviderWithNavigate({ children }: { children: ReactNode }) {
       domain={auth0Domain}
       clientId={clientId}
       authorizationParams={{
-        redirect_uri:
-          import.meta.env.VITE_AUTH0_REDIRECT_URI || window.location.origin,
-        audience: import.meta.env.VITE_AUTH0_AUDIENCE || '',
+        redirect_uri: redirectUri,
+        audience,
       }}
       onRedirectCallback={onRedirectCallback}
     >
