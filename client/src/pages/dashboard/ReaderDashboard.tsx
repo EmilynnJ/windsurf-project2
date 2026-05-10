@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../../components/ToastProvider';
 import { useWebSocketEvent } from '../../hooks/useWebSocket';
+import { useWsPollingFallback } from '../../hooks/useWsPollingFallback';
 import { apiService } from '../../services/api';
 import { ChatTranscriptModal } from '../../components/ChatTranscriptModal';
 import {
@@ -228,6 +229,10 @@ export function ReaderDashboard() {
       [addToast, loadPending],
     ),
   );
+
+  // Polling fallback: when the WS isn't connected (e.g. Vercel-only deploy),
+  // poll the inbox every 30 s so new requests still appear without refresh.
+  useWsPollingFallback(loadPending, !!user, 30_000);
 
   const handleAccept = useCallback(
     async (readingId: number) => {

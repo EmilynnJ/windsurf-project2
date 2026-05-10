@@ -24,7 +24,20 @@ class BillingService {
     logger.info("Billing service stopped");
   }
 
-  private async tick(): Promise<void> {
+  /**
+   * Public entry point for the billing tick. Used by both the in-process
+   * timer (long-running deployments) and the Vercel Cron handler at
+   * `/api/cron/billing-tick`. Idempotent and safe to call concurrently —
+   * each per-reading mutation runs in a DB transaction with row-level
+   * effects.
+   */
+  async runTick(): Promise<{ swept: number; charged: number }> {
+    return this.tick();
+  }
+
+  private async tick(): Promise<{ swept: number; charged: number }> {
+    let swept = 0;
+    let charged = 0;
     try {
       const db = getDb();
 
@@ -43,6 +56,7 @@ class BillingService {
 
       for (const reading of stale) {
         await this.endReading(reading.id, "missed", "grace_period_expired");
+        swept += 1;
         logger.warn({ readingId: reading.id }, "Reading ended due to stale heartbeat (grace period expired)");
       }
 
@@ -54,10 +68,12 @@ class BillingService {
 
       for (const reading of active) {
         await this.chargeMinute(reading);
+        charged += 1;
       }
     } catch (err) {
       logger.error({ err }, "Billing tick error");
     }
+    return { swept, charged };
   }
 
   private async chargeMinute(
