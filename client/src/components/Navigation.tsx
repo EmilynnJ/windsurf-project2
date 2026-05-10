@@ -15,7 +15,10 @@ const NAV_ITEMS = [
 ] as const;
 
 function Navigation() {
-  const { isAuthenticated, user, login, logout } = useAuth();
+  const { isAuthenticated, isAuth0Authenticated, user, login, logout } = useAuth();
+  const showSignedInUi = isAuth0Authenticated || isAuthenticated || !!user;
+  const dashboardRoute = user ? '/dashboard' : '/login';
+  const profileRoute = user?.id ? `/readers/${user.id}` : '/dashboard';
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const location = useLocation();
@@ -90,15 +93,22 @@ function Navigation() {
               </NavLink>
             </li>
           ))}
-          {isAuthenticated && (
+          {showSignedInUi && (
             <li>
-              <NavLink to="/dashboard" className={linkClass}>
+              <NavLink to={dashboardRoute} className={linkClass}>
                 Dashboard
               </NavLink>
             </li>
           )}
+          {showSignedInUi && user?.role === 'reader' && (
+            <li>
+              <NavLink to={profileRoute} className={linkClass}>
+                Profile
+              </NavLink>
+            </li>
+          )}
           <li>
-            {isAuthenticated ? (
+            {showSignedInUi ? (
               <div className="flex items-center gap-3">
                 {user?.fullName && (
                   <span className="nav__user-name">{user.fullName}</span>
@@ -144,14 +154,19 @@ function Navigation() {
             {item.label}
           </NavLink>
         ))}
-        {isAuthenticated && (
-          <NavLink to="/dashboard" className={mobileLinkClass}>
+        {showSignedInUi && (
+          <NavLink to={dashboardRoute} className={mobileLinkClass}>
             Dashboard
+          </NavLink>
+        )}
+        {showSignedInUi && user?.role === 'reader' && (
+          <NavLink to={profileRoute} className={mobileLinkClass}>
+            Profile
           </NavLink>
         )}
 
         <div className="nav__mobile-auth">
-          {isAuthenticated ? (
+          {showSignedInUi ? (
             <>
               {user?.fullName && (
                 <p className="nav__mobile-user-name">
