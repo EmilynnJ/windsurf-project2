@@ -2,6 +2,7 @@ import { eq, and, or, desc, asc } from 'drizzle-orm';
 import { db } from '../db/db';
 import { readings, users, transactions, transactionTypeEnum } from '@soulseer/shared/schema';
 import { AgoraService } from './agora-service';
+import { BillingService } from './billing-service';
 import { z } from 'zod';
 import { GracePeriodService } from './grace-period-service';
 
@@ -379,62 +380,10 @@ export class ReadingService {
   }
 
   /**
-   * Processes payment for a completed reading
+   * Processes payment for a completed reading with 60/40 revenue split
    */
   static async processPayment(readingId: number, clientId: number, readerId: number, amount: number): Promise<void> {
-    await db.transaction(async (tx) => {
-      // Get current client and reader balances
-      const client = await tx.query.users.findFirst({
-        where: eq(users.id, clientId),
-        columns: { accountBalance: true },
-      });
-
-      const reader = await tx.query.users.findFirst({
-        where: eq(users.id, readerId),
-        columns: { accountBalance: true },
-      });
-
-      if (!client || !reader) {
-        throw new Error('Client or reader not found');
-      }
-
-      // Check if client has sufficient balance
-      if (client.accountBalance < amount) {
-        throw new Error('Insufficient balance for payment');
-      }
-
-      // Update balances
-      await tx
-        .update(users)
-        .set({ accountBalance: client.accountBalance - amount })
-        .where(eq(users.id, clientId));
-
-      await tx
-        .update(users)
-        .set({ accountBalance: reader.accountBalance + amount })
-        .where(eq(users.id, readerId));
-
-      // Record transaction
-      await tx.insert(transactions).values({
-        userId: clientId,
-        type: 'reading_charge',
-        amount: -amount, // Negative because it's a charge
-        balanceBefore: client.accountBalance,
-        balanceAfter: client.accountBalance - amount,
-        readingId,
-        note: `Reading payment to reader ${readerId}`,
-      });
-
-      await tx.insert(transactions).values({
-        userId: readerId,
-        type: 'reading_charge',
-        amount: amount, // Positive because it's income
-        balanceBefore: reader.accountBalance,
-        balanceAfter: reader.accountBalance + amount,
-        readingId,
-        note: `Reading payment from client ${clientId}`,
-      });
-    });
+    await BillingService.processReadingPayment(readingId, clientId, readerId, amount);
   }
 
   /**

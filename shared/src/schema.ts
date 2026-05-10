@@ -61,6 +61,8 @@ export const readings = pgTable("readings", {
   >(),
   rating: integer("rating"),
   review: text("review"),
+  resourceId: varchar("resource_id", { length: 255 }),
+  sid: varchar("sid", { length: 255 }),
 });
 
 export const transactionTypeEnum = pgEnum("transaction_type", [
@@ -89,7 +91,7 @@ export const messages = pgTable("messages", {
   id: serial("id").primaryKey(),
   senderId: integer("sender_id").notNull().references(() => users.id),
   receiverId: integer("receiver_id").notNull().references(() => users.id),
-  parentMessageId: integer("parent_message_id").references(() => messages.id),
+  parentMessageId: integer("parent_message_id").references((): any => messages.id),
   content: text("content").notNull(),
   isPaid: boolean("is_paid").notNull().default(false),
   price: integer("price"),

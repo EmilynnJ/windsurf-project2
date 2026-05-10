@@ -1,6 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
+import { useAuth0 } from '@auth0/auth0-react';
 
 export function ReadingSessionPage() {
+  const { id, sessionId } = useParams<{ id?: string; sessionId?: string }>();
+  const { getAccessTokenSilently } = useAuth0();
+  const readingId = id || sessionId;
+  const [isSessionActive, setIsSessionActive] = useState(true);
   const [activeTab, setActiveTab] = useState<'chat' | 'voice' | 'video'>('chat');
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([
@@ -8,6 +14,28 @@ export function ReadingSessionPage() {
     { id: 2, sender: 'client', text: 'I\'m seeking guidance about my career path.', timestamp: '10:31 AM' },
     { id: 3, sender: 'reader', text: 'I sense opportunities coming your way. Let me shuffle the cards...', timestamp: '10:32 AM' }
   ]);
+
+  // 30-second heartbeat
+  useEffect(() => {
+    if (!readingId || !isSessionActive) return;
+
+    const sendHeartbeat = async () => {
+      try {
+        const token = await getAccessTokenSilently();
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+        await fetch(`${apiUrl}/api/readings/${readingId}/heartbeat`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      } catch (err) {
+        console.error('Heartbeat failed:', err);
+      }
+    };
+
+    sendHeartbeat();
+    const interval = setInterval(sendHeartbeat, 30000);
+    return () => clearInterval(interval);
+  }, [readingId, isSessionActive, getAccessTokenSilently]);
 
   const sendMessage = () => {
     if (message.trim()) {

@@ -11,6 +11,10 @@ const topUpSchema = z.object({
   amount: z.number().positive('Amount must be positive'),
 });
 
+const createIntentSchema = z.object({
+  amount: z.number().int().positive('Amount must be a positive integer in cents'),
+});
+
 const transactionHistorySchema = z.object({
   limit: z.number().min(1).max(100).optional().default(20),
   offset: z.number().min(0).optional().default(0),
@@ -41,6 +45,51 @@ router.post('/create-payment-intent', authMiddleware, async (req, res) => {
 
     // Create payment intent
     const { clientSecret, paymentIntentId } = await createPaymentIntent(userId, amount);
+
+    res.json({
+      clientSecret,
+      paymentIntentId,
+      amount,
+    });
+  } catch (error) {
+    console.error('Error creating payment intent:', error);
+    
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Invalid input', details: error.errors });
+    }
+    
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Route to create a payment intent for Stripe Payment Element (cents-based)
+router.post('/create-intent', authMiddleware, async (req: any, res: any) => {
+  try {
+    // Validate request body
+    const { amount } = createIntentSchema.parse(req.body);
+
+    // Validate amount is reasonable (e.g., max $1000 = 100000 cents)
+    if (amount > 100000) {
+      return res.status(400).json({ error: 'Maximum top-up amount is $1000' });
+    }
+    
+    // Minimum amount validation ($5 = 500 cents)
+    if (amount < 500) {
+      return res.status(400).json({ error: 'Minimum top-up amount is $5' });
+    }
+
+    const userId = req.user!.id;
+
+    // Validate that Stripe is properly configured
+    if (!process.env.STRIPE_SECRET_KEY) {
+      return res.status(500).json({ error: 'Payment system not configured' });
+    }
+
+    // Convert cents to dollars for Stripe
+    const amountInDollars = amount / 100;
+
+    // Create payment intent
+    const { clientSecret, paymentIntentId } = await createPaymentIntent(userId, amountInDollars);
 
     res.json({
       clientSecret,

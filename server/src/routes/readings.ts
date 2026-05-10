@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import { authMiddleware } from '../middleware/auth';
 import { ReadingService } from '../services/reading-service';
+import { acquireResource, startRecording, stopRecording } from '../services/agora-rtmp';
 import { z } from 'zod';
 import { db } from '../db/db';
 import { readings, users } from '@soulseer/shared/schema';
@@ -121,7 +122,24 @@ router.patch('/:id/start', authMiddleware, async (req: any, res: Response) => {
 
     const reading = await ReadingService.startReading(id, req.user!.id);
 
-    res.json(reading);
+    // Start Agora cloud recording
+    try {
+      const token = await ReadingService.generateAgoraToken(id, req.user!.id);
+      const uid = String(req.user!.id);
+      const resourceId = await acquireResource(reading.channelName, uid);
+      const sid = await startRecording(reading.channelName, uid, resourceId, token);
+
+      // Store resourceId and sid on the reading record
+      await db.update(readings)
+        .set({ resourceId, sid })
+        .where(eq(readings.id, id));
+
+      res.json({ ...reading, resourceId, sid });
+    } catch (recordingError) {
+      console.error('Failed to start cloud recording:', recordingError);
+      // Continue without recording — session is still valid
+      res.json(reading);
+    }
   } catch (error) {
     console.error('Error starting reading:', error);
     if (error instanceof Error && error.message.includes('Unauthorized')) {
@@ -140,6 +158,26 @@ router.patch('/:id/end', authMiddleware, async (req: any, res: Response) => {
     }
 
     const reading = await ReadingService.endReading(id, req.user!.id);
+
+    // Stop Agora cloud recording if resourceId and sid exist
+    try {
+      const readingRecord = await db.query.readings.findFirst({
+        where: eq(readings.id, id),
+        columns: { resourceId: true, sid: true, channelName: true },
+      });
+
+      if (readingRecord?.resourceId && readingRecord?.sid) {
+        await stopRecording(
+          readingRecord.channelName,
+          String(req.user!.id),
+          readingRecord.resourceId,
+          readingRecord.sid
+        );
+      }
+    } catch (recordingError) {
+      console.error('Failed to stop cloud recording:', recordingError);
+      // Continue — session is already ended
+    }
 
     res.json(reading);
   } catch (error) {

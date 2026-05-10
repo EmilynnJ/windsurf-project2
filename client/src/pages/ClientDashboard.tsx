@@ -1,4 +1,9 @@
+import { useState } from 'react';
+import { AddFundsModal } from '../components/AddFundsModal';
+
 export function ClientDashboard() {
+  const [isAddFundsModalOpen, setIsAddFundsModalOpen] = useState(false);
+
   // Mock data for the dashboard
   const upcomingSessions = [
     { id: 1, reader: 'Luna Starweaver', specialty: 'Tarot Reading', date: 'Today, 2:00 PM', duration: '30 min', price: '$89.97' },
@@ -133,7 +138,11 @@ export function ClientDashboard() {
                   <span>💬</span>
                   <span>Send Message</span>
                 </button>
-                <button className="btn btn-outline" style={{ padding: '0.75rem', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <button 
+                  className="btn btn-outline" 
+                  style={{ padding: '0.75rem', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                  onClick={() => setIsAddFundsModalOpen(true)}
+                >
                   <span>💳</span>
                   <span>Add Funds</span>
                 </button>
@@ -161,6 +170,11 @@ export function ClientDashboard() {
           </div>
         </div>
       </div>
+
+      <AddFundsModal 
+        isOpen={isAddFundsModalOpen} 
+        onClose={() => setIsAddFundsModalOpen(false)} 
+      />
     </div>
   );
 }

@@ -1,4 +1,23 @@
+import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth0 } from '@auth0/auth0-react';
+import { useWebSocket } from '../context/WebSocketContext';
+
+interface IncomingRequest {
+  id: number;
+  clientName: string;
+  clientId: number;
+  type: 'chat' | 'voice' | 'video';
+  ratePerMinute: number;
+  timestamp: string;
+}
+
 export function ReaderDashboard() {
+  const navigate = useNavigate();
+  const { getAccessTokenSilently } = useAuth0();
+  const { subscribe, unsubscribe } = useWebSocket();
+  const [incomingRequests, setIncomingRequests] = useState<IncomingRequest[]>([]);
+  
   // Mock data for the reader dashboard
   const earnings = 1245.67;
   const sessionsCompleted = 24;
@@ -17,6 +36,61 @@ export function ReaderDashboard() {
     { id: 2, client: 'Taylor S.', rating: 5, comment: 'So accurate and compassionate. Will definitely book again.', date: 'Yesterday' },
     { id: 3, client: 'Jordan P.', rating: 4, comment: 'Had a wonderful session. Very intuitive reader.', date: 'Mar 12' }
   ];
+
+  // Handle incoming reading request from WebSocket
+  const handleNewRequest = useCallback((data: any) => {
+    const newRequest: IncomingRequest = {
+      id: data.readingId,
+      clientName: data.clientName || `Client #${data.clientId}`,
+      clientId: data.clientId,
+      type: data.type,
+      ratePerMinute: data.ratePerMinute,
+      timestamp: new Date().toISOString(),
+    };
+    setIncomingRequests((prev) => [...prev, newRequest]);
+  }, []);
+
+  // Subscribe to reader:new_request events
+  useEffect(() => {
+    subscribe('reader:new_request', handleNewRequest);
+    return () => {
+      unsubscribe('reader:new_request', handleNewRequest);
+    };
+  }, [subscribe, unsubscribe, handleNewRequest]);
+
+  // Accept reading request
+  const handleAcceptRequest = async (readingId: number) => {
+    try {
+      const token = await getAccessTokenSilently();
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+      
+      const response = await fetch(`${apiUrl}/api/readings/${readingId}/accept`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to accept reading');
+      }
+
+      // Remove the request from the list
+      setIncomingRequests((prev) => prev.filter((req) => req.id !== readingId));
+      
+      // Navigate to the reading session
+      navigate(`/reading/${readingId}`);
+    } catch (err) {
+      console.error('Error accepting reading:', err);
+      alert('Failed to accept reading. Please try again.');
+    }
+  };
+
+  // Dismiss request (when cancelled or timed out)
+  const handleDismissRequest = (readingId: number) => {
+    setIncomingRequests((prev) => prev.filter((req) => req.id !== readingId));
+  };
 
   return (
     <div className="reader-dashboard" style={{
@@ -59,8 +133,66 @@ export function ReaderDashboard() {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '2rem', marginBottom: '2rem' }}>
-          {/* Left Column - Today's Schedule and Recent Reviews */}
+          {/* Left Column - Incoming Requests, Today's Schedule and Recent Reviews */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+            {/* Incoming Requests Panel */}
+            {incomingRequests.length > 0 && (
+              <div className="card" style={{ padding: '1.5rem', border: '2px solid #FF69B4' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                  <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#FF69B4' }}>Incoming Requests</h2>
+                  <span style={{ 
+                    backgroundColor: '#FF69B4', 
+                    color: 'white', 
+                    padding: '0.25rem 0.75rem', 
+                    borderRadius: '12px',
+                    fontSize: '0.875rem'
+                  }}>
+                    {incomingRequests.length} new
+                  </span>
+                </div>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  {incomingRequests.map((request) => (
+                    <div key={request.id} className="card" style={{ 
+                      padding: '1rem', 
+                      backgroundColor: 'rgba(255, 105, 180, 0.1)',
+                      border: '1px solid rgba(255, 105, 180, 0.3)'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
+                        <div>
+                          <h3 style={{ fontSize: '1.1rem', fontWeight: '600', marginBottom: '0.25rem' }}>{request.clientName}</h3>
+                          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                            {request.type.charAt(0).toUpperCase() + request.type.slice(1)} Reading
+                          </p>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <p style={{ fontWeight: 'bold', color: '#D4AF37', fontSize: '1.1rem' }}>
+                            ${(request.ratePerMinute / 100).toFixed(2)}/min
+                          </p>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <button 
+                          className="btn btn-primary" 
+                          style={{ flex: 1, padding: '0.5rem' }}
+                          onClick={() => handleAcceptRequest(request.id)}
+                        >
+                          Accept
+                        </button>
+                        <button 
+                          className="btn btn-outline" 
+                          style={{ padding: '0.5rem 1rem' }}
+                          onClick={() => handleDismissRequest(request.id)}
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Today's Schedule */}
             <div className="card" style={{ padding: '1.5rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>

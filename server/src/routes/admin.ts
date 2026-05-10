@@ -4,6 +4,11 @@ import { eq, ilike, and, or, count, sql, desc, asc } from 'drizzle-orm';
 import { getDb } from '../db/db';
 import { users, readings, transactions, forumPosts, forumComments, forumFlags, messages } from '@soulseer/shared/schema';
 import { authMiddleware as rawAuthMiddleware } from '../middleware/auth';
+import Stripe from 'stripe';
+
+const stripe = process.env.STRIPE_SECRET_KEY
+  ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-12-18.acacia' })
+  : null;
 
 // Extend the Express Request type to include auth property
 interface AuthenticatedRequest extends Request {
@@ -926,6 +931,91 @@ router.get('/sessions/active', authMiddleware, adminMiddleware, async (req: Auth
     res.json({ sessions: activeSessions });
   } catch (error) {
     console.error('Error fetching active sessions:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Admin: Process reader payout (60/40 split already applied, $15 minimum)
+router.post('/payouts/:readerId', authMiddleware, adminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const readerId = parseInt(req.params.readerId);
+    if (isNaN(readerId)) {
+      return res.status(400).json({ error: 'Invalid reader ID' });
+    }
+
+    const db = getDb();
+
+    // Fetch reader's current accountBalance from DB
+    const readerResult = await db
+      .select({
+        id: users.id,
+        accountBalance: users.accountBalance,
+        stripeAccountId: users.stripeAccountId,
+        role: users.role,
+      })
+      .from(users)
+      .where(eq(users.id, readerId))
+      .limit(1);
+
+    if (readerResult.length === 0) {
+      return res.status(404).json({ error: 'Reader not found' });
+    }
+
+    const reader = readerResult[0];
+    if (!reader) {
+      return res.status(404).json({ error: 'Reader not found' });
+    }
+
+    if (reader.role !== 'reader') {
+      return res.status(400).json({ error: 'User is not a reader' });
+    }
+
+    // Minimum payout is $15.00 (1500 cents)
+    if (reader.accountBalance < 1500) {
+      return res.status(400).json({ error: 'Minimum payout is $15.00' });
+    }
+
+    const paidOut = reader.accountBalance;
+
+    // Transfer to reader's Stripe Connect account if configured
+    if (stripe && reader.stripeAccountId) {
+      try {
+        await stripe.transfers.create({
+          amount: paidOut,
+          currency: 'usd',
+          destination: reader.stripeAccountId,
+        });
+      } catch (stripeError) {
+        console.error('Stripe transfer failed:', stripeError);
+        return res.status(500).json({ error: 'Stripe transfer failed' });
+      }
+    }
+
+    // On success: set accountBalance = 0 and log transaction record
+    await db.transaction(async (tx) => {
+      // Update reader balance to 0
+      await tx
+        .update(users)
+        .set({ accountBalance: 0 })
+        .where(eq(users.id, readerId));
+
+      // Log payout transaction
+      await tx.insert(transactions).values({
+        userId: readerId,
+        type: 'payout',
+        amount: -paidOut,
+        balanceBefore: paidOut,
+        balanceAfter: 0,
+        note: `Admin payout of $${(paidOut / 100).toFixed(2)}`,
+      });
+    });
+
+    res.status(200).json({
+      success: true,
+      amount: paidOut,
+    });
+  } catch (error) {
+    console.error('Error processing payout:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
