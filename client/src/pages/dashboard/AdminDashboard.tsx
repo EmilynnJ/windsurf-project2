@@ -615,9 +615,9 @@ export function AdminDashboard() {
                   size="sm"
                   onClick={() => {
                     setProvisionForm({
-                      adminPassword: 'Jade2014!',
-                      readerPassword: 'Jade2014!',
-                      clientPassword: 'Jade2014!',
+                      adminPassword: '',
+                      readerPassword: '',
+                      clientPassword: '',
                     });
                     setProvisionOpen(true);
                   }}
