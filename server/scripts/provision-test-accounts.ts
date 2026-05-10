@@ -71,18 +71,16 @@ const SPECS: AccountSpec[] = [
 function required(name: string): string {
   const v = process.env[name];
   if (!v) {
-    console.error(`Missing required env var: ${name}`);
-    process.exit(1);
+    throw new Error(`Missing required env var: ${name}`);
   }
   return v;
 }
 
 async function main() {
   if (!config.auth0Management.enabled) {
-    console.error(
+    throw new Error(
       'Auth0 Management is not configured. Set AUTH0_MGMT_CLIENT_ID and AUTH0_MGMT_CLIENT_SECRET.',
     );
-    process.exit(1);
   }
 
   const mgmt = new ManagementClient({

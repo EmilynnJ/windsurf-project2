@@ -16,7 +16,7 @@
 .section-title__text {
   font-family: var(--font-heading);
   font-size: clamp(1.8rem, 4vw, 2.6rem);
-  color: var(--pink);
+  color: var(--primary-pink);
   letter-spacing: 0.02em;
 }
 
@@ -30,7 +30,7 @@
 .section-title__divider {
   width: 60px;
   height: 2px;
-  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+  background: linear-gradient(90deg, transparent, var(--accent-gold), transparent);
   margin-top: var(--space-2);
 }
 
@@ -57,7 +57,7 @@
 .reader-card__name {
   font-family: var(--font-heading);
   font-size: 1.5rem;
-  color: var(--pink);
+  color: var(--primary-pink);
   margin: 0;
 }
 
@@ -95,7 +95,7 @@
 }
 
 .reader-card__rate-value {
-  color: var(--gold);
+  color: var(--accent-gold);
   font-weight: 600;
 }
 
@@ -200,13 +200,13 @@
 }
 
 .accordion__trigger:hover {
-  color: var(--pink);
+  color: var(--primary-pink);
 }
 
 .accordion__chevron {
   font-size: 0.75rem;
   transition: transform 0.2s;
-  color: var(--gold);
+  color: var(--accent-gold);
 }
 
 .accordion__item--open .accordion__chevron {
@@ -335,14 +335,14 @@
 }
 
 .category-chip:hover {
-  border-color: var(--pink);
+  border-color: var(--primary-pink);
   color: var(--text-primary);
 }
 
 .category-chip--active {
   background: rgba(255, 105, 180, 0.15);
-  border-color: var(--pink);
-  color: var(--pink);
+  border-color: var(--primary-pink);
+  color: var(--primary-pink);
   font-weight: 600;
 }
 
@@ -360,7 +360,7 @@
   height: 200px;
   border-radius: 50%;
   object-fit: cover;
-  border: 3px solid var(--gold);
+  border: 3px solid var(--accent-gold);
   box-shadow: 0 0 30px rgba(212, 175, 55, 0.2);
   flex-shrink: 0;
 }
@@ -368,13 +368,13 @@
 .founder__name {
   font-family: var(--font-heading);
   font-size: clamp(2rem, 5vw, 3rem);
-  color: var(--pink);
+  color: var(--primary-pink);
 }
 
 .founder__title {
   font-family: var(--font-body);
   font-size: 1.05rem;
-  color: var(--gold);
+  color: var(--accent-gold);
   font-weight: 500;
   letter-spacing: 0.03em;
 }
@@ -402,7 +402,7 @@
   width: 120px;
   height: 120px;
   border-radius: 50%;
-  background: radial-gradient(circle, var(--pink) 0%, transparent 70%);
+  background: radial-gradient(circle, var(--primary-pink) 0%, transparent 70%);
   opacity: 0.3;
   animation: cosmicPulse 3s ease-in-out infinite;
   position: absolute;
@@ -435,14 +435,14 @@
   height: 160px;
   border-radius: 50%;
   object-fit: cover;
-  border: 3px solid var(--gold);
+  border: 3px solid var(--accent-gold);
   box-shadow: 0 0 25px rgba(212, 175, 55, 0.15);
 }
 
 .profile-hero__name {
   font-family: var(--font-heading);
   font-size: clamp(2rem, 5vw, 3rem);
-  color: var(--pink);
+  color: var(--primary-pink);
 }
 
 @media (min-width: 768px) {
@@ -484,7 +484,7 @@
 .profile-rate__price {
   font-size: 1.5rem;
   font-weight: 700;
-  color: var(--gold);
+  color: var(--accent-gold);
   font-family: var(--font-body);
 }
 
@@ -552,7 +552,7 @@
 
 .toggle__track--active {
   background: rgba(255, 105, 180, 0.3);
-  border-color: var(--pink);
+  border-color: var(--primary-pink);
 }
 
 .toggle__thumb {
@@ -568,7 +568,7 @@
 
 .toggle__track--active .toggle__thumb {
   left: 29px;
-  background: var(--pink);
+  background: var(--primary-pink);
   box-shadow: 0 0 12px rgba(255, 105, 180, 0.4);
 }
 
@@ -579,7 +579,7 @@
 }
 
 .toggle__label--online {
-  color: var(--pink);
+  color: var(--primary-pink);
 }
 
 .toggle__label--offline {
@@ -605,7 +605,7 @@
 .balance-display__amount {
   font-size: clamp(2rem, 5vw, 3rem);
   font-weight: 700;
-  color: var(--gold);
+  color: var(--accent-gold);
   font-family: var(--font-body);
 }
 
@@ -631,13 +631,13 @@
 }
 
 .amount-preset:hover {
-  border-color: var(--gold);
+  border-color: var(--accent-gold);
 }
 
 .amount-preset--selected {
-  border-color: var(--gold);
+  border-color: var(--accent-gold);
   background: rgba(212, 175, 55, 0.12);
-  color: var(--gold);
+  color: var(--accent-gold);
   box-shadow: 0 0 15px rgba(212, 175, 55, 0.15);
 }
 
@@ -699,7 +699,7 @@
 }
 
 .session-bar__value--cost {
-  color: var(--gold);
+  color: var(--accent-gold);
 }
 
 .session-bar__value--balance {
@@ -869,9 +869,9 @@
 }
 
 .call-controls__btn--active {
-  border-color: var(--pink);
+  border-color: var(--primary-pink);
   background: rgba(255, 105, 180, 0.15);
-  color: var(--pink);
+  color: var(--primary-pink);
 }
 
 .call-controls__btn--end {
@@ -896,7 +896,7 @@
 .audio-vis__bar {
   width: 4px;
   border-radius: 2px;
-  background: var(--pink);
+  background: var(--primary-pink);
   animation: audioBar 0.8s ease-in-out infinite;
 }
 
@@ -930,15 +930,15 @@
 .connection-status--connected { color: #86EFAC; }
 .connection-status--connected .connection-status__dot { background: #86EFAC; }
 
-.connection-status--connecting { color: var(--gold); }
+.connection-status--connecting { color: var(--accent-gold); }
 .connection-status--connecting .connection-status__dot {
-  background: var(--gold);
+  background: var(--accent-gold);
   animation: pulse 1s infinite;
 }
 
-.connection-status--reconnecting { color: var(--gold); }
+.connection-status--reconnecting { color: var(--accent-gold); }
 .connection-status--reconnecting .connection-status__dot {
-  background: var(--gold);
+  background: var(--accent-gold);
   animation: pulse 0.5s infinite;
 }
 
@@ -991,7 +991,7 @@
 }
 
 .star--filled {
-  color: var(--gold);
+  color: var(--accent-gold);
 }
 
 /* ── Divider Full Width inside containers ──────────────────── */
@@ -1018,7 +1018,7 @@
 .legal-card__title {
   font-family: var(--font-heading);
   font-size: 1.15rem;
-  color: var(--pink);
+  color: var(--primary-pink);
   margin: 0;
 }
 
@@ -1124,7 +1124,7 @@
 }
 
 .reader-app-form__required {
-  color: var(--pink);
+  color: var(--primary-pink);
 }
 
 .reader-app-form__hint {
@@ -1159,7 +1159,7 @@
 .reader-app-form__checkbox input[type='checkbox'] {
   width: 18px;
   height: 18px;
-  accent-color: var(--pink);
+  accent-color: var(--primary-pink);
   cursor: pointer;
 }
 
@@ -1173,7 +1173,7 @@
 }
 
 .reader-app-form__agree a {
-  color: var(--pink);
+  color: var(--primary-pink);
 }
 
 .reader-app-form__error {

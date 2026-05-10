@@ -60,7 +60,7 @@ export const users = pgTable(
     id: serial("id").primaryKey(),
     auth0Id: varchar("auth0_id", { length: 255 }).notNull(),
     email: varchar("email", { length: 255 }).notNull(),
-    username: varchar("username", { length: 100 }),
+    username: varchar("username", { length: 100 }).unique(),
     fullName: varchar("full_name", { length: 255 }),
     role: userRoleEnum("role").notNull().default("client"),
 

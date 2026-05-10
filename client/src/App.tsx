@@ -62,26 +62,18 @@ function AppRoutes() {
 function Auth0ProviderWithNavigate({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
 
-  const auth0Domain = (import.meta.env.VITE_AUTH0_DOMAIN || '')
-    .replace(/^https?:\/\//, '')
-    .replace(/\/$/, '');
-  const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID || '';
-  const audience = import.meta.env.VITE_AUTH0_AUDIENCE || '';
+  const auth0Domain = import.meta.env.VITE_AUTH0_DOMAIN;
+  const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID;
+  const audience = import.meta.env.VITE_AUTH0_AUDIENCE;
+
+  if (!auth0Domain || !clientId || !audience) {
+    throw new Error('Missing Auth0 configuration variables in environment.');
+  }
+
   const redirectUri = (
     import.meta.env.VITE_AUTH0_REDIRECT_URI ||
     (typeof window !== 'undefined' ? window.location.origin : '')
   ).replace(/\/$/, '');
-
-  if (!auth0Domain || !clientId) {
-    console.error(
-      '[SoulSeer] Auth0 env vars missing. Ensure VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID are set.',
-    );
-  }
-  if (!audience) {
-    console.warn(
-      '[SoulSeer] VITE_AUTH0_AUDIENCE is not set — backend JWT validation will reject tokens.',
-    );
-  }
 
   const onRedirectCallback = (appState?: AppState) => {
     const target = appState?.returnTo || '/dashboard';

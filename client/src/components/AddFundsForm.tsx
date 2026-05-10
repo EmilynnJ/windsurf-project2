@@ -20,7 +20,6 @@ function getStripe(): Promise<StripeClient | null> {
   if (stripePromise) return stripePromise;
   const key = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
   if (!key) {
-    console.error('[SoulSeer] VITE_STRIPE_PUBLISHABLE_KEY is not configured.');
     stripePromise = Promise.resolve(null);
     return stripePromise;
   }

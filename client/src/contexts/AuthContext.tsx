@@ -26,6 +26,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshUser = useCallback(async () => {
     if (!auth0IsAuth || !auth0User) {
+      apiService.setAccessToken(null);
       setUser(null);
       setAuthError(null);
       setIsLoading(false);
@@ -91,6 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider
       value={{
         user,
+        hasSession: auth0IsAuth,
         isAuthenticated: auth0IsAuth && !!user,
         isAuth0Authenticated: auth0IsAuth,
         isLoading: auth0Loading || isLoading,

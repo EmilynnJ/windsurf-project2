@@ -24,6 +24,7 @@ export interface User {
 
 export interface AuthState {
   user: User | null;
+  hasSession: boolean;
   isAuthenticated: boolean;
   isLoading: boolean;
   login: () => Promise<void>;

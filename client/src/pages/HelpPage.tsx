@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '../components/ui';
+import { useToast } from '../components/ToastProvider';
 
 /* ── Legal Policy Links ─────────────────────────────────────────
    Update each `href` with your Termly-generated document URL.
@@ -17,31 +18,31 @@ const LEGAL_LINKS = [
     icon: '📜',
     title: 'Terms of Service',
     description: 'The rules and guidelines for using the SoulSeer platform as a client or reader.',
-    href: '#', // TODO: replace with Termly Terms of Service URL
+    href: '/legal/terms',
   },
   {
     icon: '🍪',
     title: 'Cookie Policy',
     description: 'Information about cookies we use, why we use them, and how to manage them.',
-    href: '#', // TODO: replace with Termly Cookie Policy URL
+    href: '/legal/cookie-policy',
   },
   {
     icon: '💰',
     title: 'Refund Policy',
     description: 'Our policy on refunds, account credits, and resolution of session disputes.',
-    href: '#', // TODO: replace with Termly Refund Policy URL
+    href: '/legal/refund-policy',
   },
   {
     icon: '🤝',
     title: 'Reader Agreement',
     description: 'Terms, responsibilities, and guidelines for SoulSeer readers and practitioners.',
-    href: '#', // TODO: replace with Termly Reader Agreement URL
+    href: '/legal/reader-agreement',
   },
   {
     icon: '⚖️',
     title: 'Disclaimer',
     description: 'Important disclaimers about the nature of psychic readings and entertainment purposes.',
-    href: '#', // TODO: replace with Termly Disclaimer URL
+    href: '/legal/disclaimer',
   },
 ] as const;
 
@@ -412,11 +413,11 @@ function ReaderApplicationForm() {
         />
         <span>
           I have read and agree to the{' '}
-          <a href="#legal" onClick={(e) => e.stopPropagation()}>
+          <a href="/legal/reader-agreement">
             Reader Agreement
           </a>{' '}
           and{' '}
-          <a href="#legal" onClick={(e) => e.stopPropagation()}>
+          <a href="/legal/terms">
             Terms of Service
           </a>
           .
@@ -442,6 +443,7 @@ function ReaderApplicationForm() {
 export function HelpPage() {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   const [showAppForm, setShowAppForm] = useState(false);
+  const { addToast } = useToast();
 
   const toggleItem = useCallback((index: number) => {
     setOpenIndex((prev) => (prev === index ? null : index));
@@ -589,16 +591,11 @@ export function HelpPage() {
                 </p>
               </div>
               <a
-                href="#" /* TODO: Replace with your hosted PDF URL (Google Drive, Dropbox, etc.) */
+                href="/docs/reader-application.pdf"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="btn btn--secondary"
                 aria-label="Download Reader Application PDF"
-                onClick={(e) => {
-                  // Remove this handler once you have a real PDF URL
-                  e.preventDefault();
-                  alert('PDF coming soon! Please use the online form below or email apply@soulseer.app');
-                }}
               >
                 Download PDF
               </a>

@@ -575,7 +575,6 @@ export function ReadingSessionPage() {
         if (mounted) {
           setConnectionState('disconnected');
           addToast('error', 'Failed to connect. Please check your connection.');
-          console.error('Agora init error:', err);
         }
       }
     }

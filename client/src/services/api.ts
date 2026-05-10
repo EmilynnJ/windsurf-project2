@@ -33,13 +33,14 @@ class ApiService {
 
     if (!res.ok) {
       let errorMessage = `Request failed (${res.status})`;
+      let parseError: unknown = null;
       try {
         const data = await res.json();
         errorMessage = data.message || data.error || errorMessage;
-      } catch {
-        // ignore parse errors
+      } catch (err) {
+        parseError = err;
       }
-      throw new Error(errorMessage);
+      throw new Error(errorMessage, parseError ? { cause: parseError } : undefined);
     }
 
     // Handle 204 No Content
@@ -86,13 +87,14 @@ class ApiService {
 
     if (!res.ok) {
       let errorMessage = `Request failed (${res.status})`;
+      let parseError: unknown = null;
       try {
         const data = await res.json();
         errorMessage = data.message || data.error || errorMessage;
-      } catch {
-        /* ignore parse errors */
+      } catch (err) {
+        parseError = err;
       }
-      throw new Error(errorMessage);
+      throw new Error(errorMessage, parseError ? { cause: parseError } : undefined);
     }
 
     if (res.status === 204) return undefined as T;
