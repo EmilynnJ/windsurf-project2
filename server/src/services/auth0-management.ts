@@ -115,6 +115,52 @@ class Auth0ManagementService {
   }
 
   /**
+   * Create the user, or if one already exists with the same email, update the
+   * password to the supplied value. Used for QA test-account provisioning where
+   * the caller wants a known, repeatable password.
+   */
+  async upsertUserWithPassword(params: {
+    email: string;
+    password: string;
+    fullName: string;
+    role: 'admin' | 'reader' | 'client';
+    username?: string | null;
+  }): Promise<{ auth0Id: string; created: boolean }> {
+    const client = this.getClient();
+    try {
+      const response = await client.users.create({
+        connection: config.auth0Management.dbConnection,
+        email: params.email,
+        password: params.password,
+        email_verified: true,
+        verify_email: false,
+        name: params.fullName,
+        ...(params.username ? { username: params.username } : {}),
+        user_metadata: { role: params.role, source: 'test-provisioning' },
+        app_metadata: { role: params.role },
+      });
+      const id = response.data.user_id;
+      if (!id) throw new Error('Auth0 did not return a user_id');
+      return { auth0Id: id, created: true };
+    } catch (err) {
+      const status = (err as { statusCode?: number }).statusCode;
+      if (status !== 409) throw err;
+      const list = await client.users.listUsersByEmail({ email: params.email });
+      const raw: unknown = Array.isArray(list)
+        ? list
+        : (list as { data?: unknown }).data;
+      const rows = Array.isArray(raw) ? (raw as Array<{ user_id?: string }>) : [];
+      const existingId = rows[0]?.user_id;
+      if (!existingId) throw new Error(`Auth0 user exists for ${params.email} but user_id is unresolved`);
+      await client.users.update(existingId, {
+        password: params.password,
+        email_verified: true,
+      });
+      return { auth0Id: existingId, created: false };
+    }
+  }
+
+  /**
    * Delete an Auth0 user. Idempotent — returns true if the user was deleted or
    * did not exist, false if the service is disabled.
    */
