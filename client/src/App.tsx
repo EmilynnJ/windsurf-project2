@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { Auth0Provider, type AppState } from '@auth0/auth0-react';
 import { type ReactNode } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import { AuthProvider } from './contexts/AuthContext';
 import { WebSocketProvider } from './contexts/WebSocketContext';
 import { ToastProvider } from './components/ToastProvider';
@@ -110,6 +111,7 @@ export default function App() {
           <AuthProvider>
             <WebSocketProvider>
               <AppRoutes />
+              <Analytics />
             </WebSocketProvider>
           </AuthProvider>
         </ToastProvider>
