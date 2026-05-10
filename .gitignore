@@ -27,6 +27,7 @@ drizzle/meta/
 *.swp
 *.swo
 *~
+.vibecheck/
 *.vibecheck
 *.env
 *.stripe
