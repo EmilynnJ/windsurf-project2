@@ -27,6 +27,7 @@ import { AboutPage } from './pages/AboutPage';
 import { HelpPage } from './pages/HelpPage';
 import { LoginPage } from './pages/LoginPage';
 import { PrivacyPolicyPage } from './pages/PrivacyPolicyPage';
+import { TermsOfServicePage } from './pages/TermsOfServicePage';
 import { NotFoundPage } from './pages/NotFoundPage';
 
 /**
@@ -112,6 +113,9 @@ function AppRoutes() {
           <Route path="/help" element={<HelpPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/privacy" element={<PrivacyPolicyPage />} />
+          <Route path="/legal/privacy" element={<PrivacyPolicyPage />} />
+          <Route path="/terms" element={<TermsOfServicePage />} />
+          <Route path="/legal/terms" element={<TermsOfServicePage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </main>
