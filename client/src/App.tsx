@@ -11,6 +11,7 @@ import { CosmicBackground } from './components/CosmicBackground';
 import { Navigation } from './components/Navigation';
 import { Footer } from './components/Footer';
 import { LoadingPage } from './components/ui';
+import { dashboardPathForRole } from './lib/dashboardRoute';
 
 // Pages
 import { HomePage } from './pages/HomePage';
@@ -40,12 +41,30 @@ function RoleRoute({
   role: 'admin' | 'reader' | 'client';
   children: ReactNode;
 }) {
-  const { user, isAuthenticated, isLoading } = useAuth();
-  if (isLoading) return <LoadingPage message="Loading your dashboard..." />;
-  if (!isAuthenticated || !user) return <Navigate to="/login" replace />;
-  if (user.role !== role) {
-    return <Navigate to={`/dashboard/${user.role}`} replace />;
+  const { user, hasSession, isAuthenticated, auth0Role, isLoading } = useAuth();
+
+  // Unauthenticated → login.
+  if (!hasSession && !isLoading) {
+    return <Navigate to="/login" replace />;
   }
+
+  // Effective role for routing decisions: prefer the DB role (authoritative)
+  // when /me has resolved, otherwise fall back to the Auth0 ID-token claim
+  // so the user lands on the correct dashboard immediately while sync is
+  // still in flight.
+  const effectiveRole = user?.role ?? auth0Role ?? null;
+
+  if (effectiveRole && effectiveRole !== role) {
+    return <Navigate to={dashboardPathForRole(effectiveRole)} replace />;
+  }
+
+  // Role matches, but the financial data hasn't loaded yet — show the
+  // celestial loading screen so the dashboard isn't interactive without it.
+  if (!user) {
+    return <LoadingPage message="Loading your dashboard..." />;
+  }
+
+  void isAuthenticated;
   return <>{children}</>;
 }
 
