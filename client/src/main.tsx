@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { Auth0Provider } from "@auth0/auth0-react";
@@ -29,4 +30,16 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       </AuthProvider>
     </Auth0Provider>
   </React.StrictMode>,
+=======
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App';
+import './styles/global.css';
+import './styles/pages.css';
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>
+>>>>>>> b0ebfcb9039e92c09e9e94e90785289e0a1daeb8
 );

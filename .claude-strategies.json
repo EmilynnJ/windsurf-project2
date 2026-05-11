@@ -1,0 +1,100 @@
+{
+  "project": "/Users/liquidgroove/Desktop/Vibecheck/Official/packages/vscode/extension",
+  "lastConsolidated": "2026-05-08T09:05:02.255Z",
+  "sessionsAnalyzed": 2,
+  "strategies": [
+    {
+      "id": "strat_0",
+      "triggerPattern": {
+        "filePatterns": [
+          "packages/vscode-extension/package.json",
+          "packages/vscode-extension/.vscodeignore"
+        ],
+        "errorPatterns": [],
+        "moduleAreas": [
+          "packages/vscode-extension"
+        ],
+        "promptKeywords": [
+          "packages",
+          "vscode-extension"
+        ]
+      },
+      "content": "📋 Module checkpoint for packages/vscode-extension (based on 2 sessions):\nWhen entering this module, preload context on:\n  - packages/vscode-extension/package.json (touched in 100% of sessions)\n  - packages/vscode-extension/.vscodeignore (touched in 50% of sessions)",
+      "scope": "project",
+      "confidence": 0.649999999976852,
+      "supportingEvidence": [
+        {
+          "sessionId": "6be1329c-6c05-43f3-b342-6ccea2938d9a",
+          "timestamp": "2026-05-08T08:26:08.827Z",
+          "outcome": "confirmed",
+          "summary": "Session touched packages/vscode-extension module"
+        },
+        {
+          "sessionId": "7ae9aa0a-44f7-4033-af16-2fa24da1f11f",
+          "timestamp": "2026-05-08T08:32:00.415Z",
+          "outcome": "confirmed",
+          "summary": "Session touched packages/vscode-extension module"
+        },
+        {
+          "sessionId": "6be1329c-6c05-43f3-b342-6ccea2938d9a",
+          "timestamp": "2026-05-08T08:26:08.827Z",
+          "outcome": "confirmed",
+          "summary": "Session touched packages/vscode-extension module"
+        },
+        {
+          "sessionId": "7ae9aa0a-44f7-4033-af16-2fa24da1f11f",
+          "timestamp": "2026-05-08T08:32:00.415Z",
+          "outcome": "confirmed",
+          "summary": "Session touched packages/vscode-extension module"
+        },
+        {
+          "sessionId": "6be1329c-6c05-43f3-b342-6ccea2938d9a",
+          "timestamp": "2026-05-08T08:26:08.827Z",
+          "outcome": "confirmed",
+          "summary": "Session touched packages/vscode-extension module"
+        },
+        {
+          "sessionId": "7ae9aa0a-44f7-4033-af16-2fa24da1f11f",
+          "timestamp": "2026-05-08T08:32:00.415Z",
+          "outcome": "confirmed",
+          "summary": "Session touched packages/vscode-extension module"
+        },
+        {
+          "sessionId": "6be1329c-6c05-43f3-b342-6ccea2938d9a",
+          "timestamp": "2026-05-08T08:26:08.827Z",
+          "outcome": "confirmed",
+          "summary": "Session touched packages/vscode-extension module"
+        },
+        {
+          "sessionId": "7ae9aa0a-44f7-4033-af16-2fa24da1f11f",
+          "timestamp": "2026-05-08T08:32:00.415Z",
+          "outcome": "confirmed",
+          "summary": "Session touched packages/vscode-extension module"
+        }
+      ],
+      "createdAt": "2026-05-08T08:34:25.802Z",
+      "lastValidated": "2026-05-08T09:05:02.255Z",
+      "decayRatePerDay": 0.002,
+      "injectionCount": 0,
+      "successCount": 0,
+      "tags": [
+        "convergence",
+        "module-checkpoint",
+        "auto-extracted"
+      ]
+    }
+  ],
+  "antiPatterns": [],
+  "optimalPaths": [
+    {
+      "sessionId": "7ae9aa0a-44f7-4033-af16-2fa24da1f11f",
+      "actualSteps": 147,
+      "optimalSteps": 53,
+      "efficiency": 0.36,
+      "keyInsight": "Agent investigated /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/src/onboarding/wizard/composers/claudeMd.ts but resolution was in /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/package.json, /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/.vscodeignore, /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/src/services/MultiIDEWriter.ts, /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/.claude/CLAUDE.md, /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/scripts/generate-claude-agents.mjs, /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/src/services/EmbedInstaller.ts, /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/src/extension.ts, /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/src/services/FunnelContext.ts, /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/src/services/PostHogClient.ts, /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/webpack.config.js, /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/src/services/ProUpsellService.ts, /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/docs/conversion-funnel.md",
+      "wrongTurnNodeId": "node_54",
+      "correctAlternative": "Should have gone directly to /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/package.json, /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/.vscodeignore, /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/src/services/MultiIDEWriter.ts, /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/.claude/CLAUDE.md, /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/scripts/generate-claude-agents.mjs, /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/src/services/EmbedInstaller.ts, /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/src/extension.ts, /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/src/services/FunnelContext.ts, /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/src/services/PostHogClient.ts, /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/webpack.config.js, /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/src/services/ProUpsellService.ts, /Users/liquidgroove/Desktop/Vibecheck-Official/packages/vscode-extension/docs/conversion-funnel.md"
+    }
+  ],
+  "schemaVersion": 1
+}

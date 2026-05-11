@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import '@testing-library/jest-dom';
 
 // Mock window.matchMedia
@@ -78,3 +79,10 @@ afterAll(() => {
   console.error = originalError;
   console.warn = originalWarn;
 });
+=======
+/**
+ * Vitest setup for client tests.
+ * Configures jsdom environment and testing-library matchers.
+ */
+import '@testing-library/react';
+>>>>>>> b0ebfcb9039e92c09e9e94e90785289e0a1daeb8

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build",
+  "outputDirectory": "client/dist",
+  "installCommand": "npm install",
+  "framework": "vite",
+  "functions": {
+    "api/index.ts": {
+      "maxDuration": 30,
+      "includeFiles": "server/dist/**"
+    },
+    "api/cron/billing-tick.ts": {
+      "maxDuration": 60,
+      "includeFiles": "server/dist/**"
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/billing-tick",
+      "schedule": "* * * * *"
+    }
+  ],
+  "rewrites": [
+    { "source": "/api/cron/(.*)", "destination": "/api/cron/$1" },
+    { "source": "/api/(.*)", "destination": "/api/index.ts" },
+    { "source": "/((?!api).*)", "destination": "/index.html" }
+  ]
+}

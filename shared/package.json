@@ -2,28 +2,52 @@
   "name": "@soulseer/shared",
   "version": "0.0.0",
   "private": true,
-  "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "require": "./dist/index.js",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./schema": {
       "types": "./dist/schema.d.ts",
-      "import": "./dist/schema.js"
+      "require": "./dist/schema.js",
+      "import": "./dist/schema.js",
+      "default": "./dist/schema.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "require": "./dist/types.js",
+      "import": "./dist/types.js",
+      "default": "./dist/types.js"
+    },
+    "./validators": {
+      "types": "./dist/validators.d.ts",
+      "require": "./dist/validators.js",
+      "import": "./dist/validators.js",
+      "default": "./dist/validators.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist"
   },
   "dependencies": {
+<<<<<<< HEAD
     "drizzle-orm": "^0.45.1",
     "zod": "^4.0.0"
+=======
+    "zod": "^3.23.8"
+  },
+  "peerDependencies": {
+    "drizzle-orm": ">=0.45.0"
+>>>>>>> b0ebfcb9039e92c09e9e94e90785289e0a1daeb8
   },
   "devDependencies": {
+    "drizzle-orm": "^0.45.2",
     "typescript": "^5.7.3"
   }
 }

@@ -1,15 +1,16 @@
 {
   "name": "@soulseer/client",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --port 3000",
-    "build": "tsc -b && vite build",
+    "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+<<<<<<< HEAD
     "test:ui": "vitest",
     "lint": "eslint src --ext .ts,.tsx",
     "lint:fix": "eslint src --ext .ts,.tsx --fix",
@@ -19,11 +20,24 @@
     "@auth0/auth0-react": "^2.2.4",
     "@stripe/react-stripe-js": "^2.4.0",
     "@stripe/stripe-js": "^2.2.0",
+=======
+    "lint": "eslint src --ext .ts,.tsx",
+    "lint:fix": "eslint src --ext .ts,.tsx --fix"
+  },
+  "dependencies": {
+    "@auth0/auth0-react": "^2.2.4",
+    "@stripe/react-stripe-js": "^6.2.0",
+    "@stripe/stripe-js": "^9.2.0",
+    "@vercel/analytics": "^2.0.1",
+    "agora-rtc-sdk-ng": "^4.20.0",
+    "agora-rtm-sdk": "^2.1.0",
+>>>>>>> b0ebfcb9039e92c09e9e94e90785289e0a1daeb8
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.2"
   },
   "devDependencies": {
+<<<<<<< HEAD
     "@types/node": "^25.5.0",
     "@types/react": "^18.3.28",
     "@types/react-dom": "^18.3.7",
@@ -38,5 +52,19 @@
     "vite": "^8.0.0",
     "vitest": "^4.1.0",
     "@testing-library/react": "^14.0.0"
+=======
+    "@testing-library/react": "^14.0.0",
+    "@types/react": "^18.3.28",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.3.4",
+    "@vitest/coverage-v8": "^4.1.0",
+    "eslint": "^8.50.0",
+    "eslint-plugin-react": "^7.33.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "jsdom": "^29.0.1",
+    "typescript": "^5.7.3",
+    "vite": "^6.4.2",
+    "vitest": "^4.1.0"
+>>>>>>> b0ebfcb9039e92c09e9e94e90785289e0a1daeb8
   }
 }
