@@ -1,0 +1,20 @@
+{
+  "name": "SoulSeer — Psychic Readings",
+  "short_name": "SoulSeer",
+  "description": "Ethical, compassionate spiritual guidance from gifted psychics. Chat, voice, or video readings.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0A0A0F",
+  "theme_color": "#0A0A0F",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["lifestyle", "social"],
+  "lang": "en-US"
+}
