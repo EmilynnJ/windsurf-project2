@@ -1,15 +1,25 @@
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": "src",
+    "rootDir": ".",
     "outDir": "dist",
+<<<<<<< HEAD
     "types": ["node", "express", "multer"],
     "typeRoots": ["./node_modules/@types", "../node_modules/@types"],
     "moduleResolution": "Bundler",
+=======
+    "declaration": true,
+    "sourceMap": true,
+    "types": ["node"],
+>>>>>>> b0ebfcb9039e92c09e9e94e90785289e0a1daeb8
     "baseUrl": ".",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
     "paths": {
+      "@soulseer/shared": ["../shared/src/index"],
       "@soulseer/shared/*": ["../shared/src/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "../shared/src"],
+  "references": [{ "path": "../shared" }]
 }

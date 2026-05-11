@@ -2,19 +2,24 @@
   "name": "soulseer",
   "private": true,
   "workspaces": [
+    "shared",
     "client",
-    "server",
-    "shared"
+    "server"
   ],
   "scripts": {
     "dev": "concurrently -n client,server -c magenta,cyan \"npm run dev -w client\" \"npm run dev -w server\"",
     "dev:client": "npm run dev -w client",
     "dev:server": "npm run dev -w server",
     "build": "npm run build -w shared && npm run build -w server && npm run build -w client",
+<<<<<<< HEAD
+=======
+    "build:shared": "npm run build -w shared",
+>>>>>>> b0ebfcb9039e92c09e9e94e90785289e0a1daeb8
     "typecheck": "npm run typecheck -w shared && npm run typecheck -w server && npm run typecheck -w client",
     "test": "npm run test -w client && npm run test -w server",
     "test:client": "npm run test -w client",
     "test:server": "npm run test -w server",
+<<<<<<< HEAD
     "test:coverage": "npm run test:coverage -w client && npm run test:coverage -w server",
     "test:e2e": "playwright test",
     "test:all": "npm run test && npm run test:e2e",
@@ -62,5 +67,46 @@
       "prettier --write",
       "git add"
     ]
+=======
+    "lint": "npm run lint -w client && npm run lint -w server",
+    "lint:fix": "npm run lint:fix -w client && npm run lint:fix -w server",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.4",
+    "@vercel/analytics": "^2.0.1",
+    "agora-token": "^2.0.5",
+    "cloudinary": "^2.5.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "drizzle-orm": "^0.45.2",
+    "express": "^4.21.2",
+    "express-oauth2-jwt-bearer": "^1.6.0",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.1.0",
+    "jose": "^5.9.6",
+    "multer": "^2.1.1",
+    "pino": "^9.9.0",
+    "pino-http": "^10.0.0",
+    "serverless-http": "^4.0.0",
+    "stripe": "^17.2.0",
+    "ws": "^8.18.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@netlify/functions": "^2.8.0",
+    "@types/cors": "^2.8.18",
+    "@types/express": "^4.17.25",
+    "@types/multer": "^1.4.12",
+    "@types/ws": "^8.5.14",
+    "@vercel/node": "^5.7.16",
+    "concurrently": "^9.2.1",
+    "drizzle-kit": "^0.31.10",
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.5"
+>>>>>>> b0ebfcb9039e92c09e9e94e90785289e0a1daeb8
   }
 }

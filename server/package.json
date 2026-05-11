@@ -2,14 +2,14 @@
   "name": "@soulseer/server",
   "version": "0.0.0",
   "private": true,
-  "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js",
+    "start": "tsx src/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
+<<<<<<< HEAD
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:ui": "vitest",
@@ -25,24 +25,39 @@
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "drizzle-orm": "^0.45.1",
+=======
+    "provision:test-accounts": "tsx scripts/provision-test-accounts.ts",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.4",
+    "@soulseer/shared": "file:../shared",
+    "@vercel/node": "5.7.16",
+    "agora-token": "^2.0.5",
+    "auth0": "^5.7.0",
+    "cloudinary": "^2.5.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "drizzle-orm": "^0.45.2",
     "express": "^4.21.2",
-    "express-jwt": "^8.4.1",
+    "express-oauth2-jwt-bearer": "^1.6.0",
+    "express-rate-limit": "^7.5.0",
     "helmet": "^8.1.0",
-    "jwks-rsa": "^3.1.0",
-    "multer": "^1.4.5-lts.1",
-    "pg": "^8.13.1",
+    "jose": "^5.9.6",
+    "multer": "^2.1.1",
     "pino": "^9.9.0",
     "pino-http": "^10.0.0",
-    "sdk": "^0.0.8",
-    "serverless-http": "^4.0.0",
     "stripe": "^17.2.0",
-    "uuid": "^11.0.3",
-    "vite": "^8.0.11",
-    "zod": "^4.0.0"
+    "ws": "^8.18.0",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/cors": "^2.8.18",
     "@types/express": "^4.17.25",
+<<<<<<< HEAD
     "@types/express-jwt": "^7.4.1",
     "@types/multer": "^1.4.12",
     "@types/pg": "^8.11.10",
@@ -52,6 +67,12 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^8.50.0",
     "eslint-plugin-security": "^1.7.1",
+=======
+    "@types/multer": "^1.4.12",
+    "@types/ws": "^8.5.14",
+    "@vitest/coverage-v8": "^4.1.0",
+    "drizzle-kit": "^0.31.10",
+>>>>>>> b0ebfcb9039e92c09e9e94e90785289e0a1daeb8
     "tsx": "^4.20.5",
     "typescript": "^5.7.3",
     "vitest": "^4.1.0"
